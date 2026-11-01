@@ -1,0 +1,446 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum RoomType {
+  GROUP
+  DIRECT
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum AttachmentKind {
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+}
+
+enum ReceiptStatus {
+  DELIVERED
+  READ
+}
+
+enum MediaStatus {
+  UPLOADING
+  READY
+  FAILED
+}
+
+// ==========================================
+// BETTER AUTH MODELS
+// ==========================================
+
+model User {
+  // Better Auth identity fields
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Additional application field
+  lastSeenAt    DateTime?
+
+  // Better Auth relations
+  sessions      Session[]
+  accounts      Account[]
+
+  // Chat relations
+  memberships   RoomMember[]
+  roomsCreated  Room[]             @relation("RoomCreator")
+  messages      Message[]
+  receipts      MessageReceipt[]
+  reactions     MessageReaction[]
+  preferences   RoomPreference[]
+
+  // Media relations
+  uploadedMedia Media[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+
+  scope                 String?
+  password              String?
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ==========================================
+// ROOMS / CONVERSATIONS
+// ==========================================
+
+model Room {
+  id          String   @id @default(uuid(7))
+  type        RoomType
+
+  // Required for GROUP rooms.
+  // Null for DIRECT rooms.
+  name        String?
+  description String?
+  image       String?
+
+  // Sorted user IDs for DIRECT conversations.
+  // Example: userA:userB
+  directKey   String?  @unique
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation(
+    "RoomCreator",
+    fields: [createdById],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  members     RoomMember[]
+  messages    Message[]
+  preferences RoomPreference[]
+
+  @@index([type])
+  @@index([createdAt(sort: Desc)])
+  @@map("room")
+}
+
+// ==========================================
+// ROOM MEMBERS
+// ==========================================
+
+model RoomMember {
+  roomId   String
+  userId   String
+
+  role     MemberRole @default(MEMBER)
+
+  joinedAt DateTime @default(now())
+
+  // Read cursor for efficient unread-message calculations.
+  // Intentionally not a foreign key.
+  lastReadMessageId String?
+
+  room Room @relation(
+    fields: [roomId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  user User @relation(
+    fields: [userId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  @@id([roomId, userId])
+  @@index([userId])
+  @@index([roomId, joinedAt])
+  @@map("room_member")
+}
+
+// ==========================================
+// ROOM PREFERENCES
+// ==========================================
+
+model RoomPreference {
+  roomId String
+  userId String
+
+  isMuted    Boolean @default(false)
+  isArchived Boolean @default(false)
+  isPinned   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  room Room @relation(
+    fields: [roomId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  user User @relation(
+    fields: [userId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  @@id([roomId, userId])
+  @@index([userId, isPinned])
+  @@index([userId, isArchived])
+  @@map("room_preference")
+}
+
+// ==========================================
+// MESSAGES
+// ==========================================
+
+model Message {
+  id              String   @id @default(uuid(7))
+
+  roomId          String
+  senderId        String
+
+  // Client-generated ID for idempotent retries.
+  clientMessageId String
+
+  // Nullable to support attachment-only messages.
+  body            String?
+
+  // Reply to another message.
+  replyToId       String?
+
+  // Server node that handled the message.
+  nodeId          String
+
+  createdAt       DateTime @default(now())
+  editedAt        DateTime?
+  deletedAt       DateTime?
+
+  room Room @relation(
+    fields: [roomId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  sender User @relation(
+    fields: [senderId],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  replyTo Message? @relation(
+    "Replies",
+    fields: [replyToId],
+    references: [id],
+    onDelete: SetNull
+  )
+
+  replies     Message[]         @relation("Replies")
+  attachments Attachment[]
+  receipts    MessageReceipt[]
+  reactions   MessageReaction[]
+
+  // Prevent duplicate messages when clients retry requests.
+  @@unique([roomId, senderId, clientMessageId])
+
+  // Efficient chronological message retrieval.
+  @@index([roomId, createdAt(sort: Desc), id(sort: Desc)])
+
+  @@index([senderId])
+  @@index([replyToId])
+  @@map("message")
+}
+
+// ==========================================
+// MESSAGE DELIVERY AND READ RECEIPTS
+// ==========================================
+
+model MessageReceipt {
+  id        String        @id @default(uuid(7))
+
+  messageId String
+  userId    String
+
+  status    ReceiptStatus @default(DELIVERED)
+
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message Message @relation(
+    fields: [messageId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  user User @relation(
+    fields: [userId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  // One receipt per recipient per message.
+  @@unique([messageId, userId])
+
+  @@index([userId, status])
+  @@index([messageId, status])
+  @@map("message_receipt")
+}
+
+// ==========================================
+// MESSAGE REACTIONS
+// ==========================================
+
+model MessageReaction {
+  id        String   @id @default(uuid(7))
+
+  messageId String
+  userId    String
+
+  // Stores the selected reaction, e.g. an emoji.
+  emoji     String
+
+  createdAt DateTime @default(now())
+
+  message Message @relation(
+    fields: [messageId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  user User @relation(
+    fields: [userId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  // A user cannot add the same reaction twice to one message.
+  @@unique([messageId, userId, emoji])
+
+  @@index([messageId])
+  @@index([userId])
+  @@map("message_reaction")
+}
+
+// ==========================================
+// MEDIA STORAGE
+// ==========================================
+
+model Media {
+  id String @id @default(uuid(7))
+
+  uploadedById String
+
+  // Storage-independent identification.
+  // Examples: S3 object key, R2 key, Cloudinary public ID.
+  storageKey      String @unique
+  storageProvider String
+
+  // Optional URL. Avoid permanent public URLs for private media.
+  url String?
+
+  originalName String
+  mimeType     String
+  bytes        BigInt
+
+  kind   AttachmentKind
+  status MediaStatus    @default(UPLOADING)
+
+  // Image/video metadata.
+  width    Int?
+  height   Int?
+  duration Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  uploadedBy User @relation(
+    fields: [uploadedById],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  attachments Attachment[]
+
+  @@index([uploadedById, status])
+  @@index([createdAt])
+  @@index([kind])
+  @@map("media")
+}
+
+// ==========================================
+// MESSAGE ATTACHMENTS
+// ==========================================
+
+model Attachment {
+  id String @id @default(uuid(7))
+
+  messageId String
+  mediaId   String
+
+  createdAt DateTime @default(now())
+
+  message Message @relation(
+    fields: [messageId],
+    references: [id],
+    onDelete: Cascade
+  )
+
+  media Media @relation(
+    fields: [mediaId],
+    references: [id],
+    onDelete: Restrict
+  )
+
+  // Prevent attaching the same media twice to one message.
+  @@unique([messageId, mediaId])
+
+  @@index([messageId])
+  @@index([mediaId])
+  @@map("attachment")
+}
