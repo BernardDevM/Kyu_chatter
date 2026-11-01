@@ -1,6 +1,5 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -46,28 +45,28 @@ enum MediaStatus {
 
 model User {
   // Better Auth identity fields
-  id            String    @id
+  id            String   @id
   name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
+  email         String   @unique
+  emailVerified Boolean  @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // Additional application field
-  lastSeenAt    DateTime?
+  lastSeenAt DateTime?
 
   // Better Auth relations
-  sessions      Session[]
-  accounts      Account[]
+  sessions Session[]
+  accounts Account[]
 
   // Chat relations
-  memberships   RoomMember[]
-  roomsCreated  Room[]             @relation("RoomCreator")
-  messages      Message[]
-  receipts      MessageReceipt[]
-  reactions     MessageReaction[]
-  preferences   RoomPreference[]
+  memberships  RoomMember[]
+  roomsCreated Room[]            @relation("RoomCreator")
+  messages     Message[]
+  receipts     MessageReceipt[]
+  reactions    MessageReaction[]
+  preferences  RoomPreference[]
 
   // Media relations
   uploadedMedia Media[]
@@ -92,23 +91,23 @@ model Session {
 }
 
 model Account {
-  id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
+  id         String @id
+  accountId  String
+  providerId String
+  userId     String
 
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
+  accessToken  String?
+  refreshToken String?
+  idToken      String?
 
   accessTokenExpiresAt  DateTime?
   refreshTokenExpiresAt DateTime?
 
-  scope                 String?
-  password              String?
+  scope    String?
+  password String?
 
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -133,8 +132,8 @@ model Verification {
 // ==========================================
 
 model Room {
-  id          String   @id @default(uuid(7))
-  type        RoomType
+  id   String   @id @default(uuid(7))
+  type RoomType
 
   // Required for GROUP rooms.
   // Null for DIRECT rooms.
@@ -144,18 +143,13 @@ model Room {
 
   // Sorted user IDs for DIRECT conversations.
   // Example: userA:userB
-  directKey   String?  @unique
+  directKey String? @unique
 
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy User @relation(
-    "RoomCreator",
-    fields: [createdById],
-    references: [id],
-    onDelete: Restrict
-  )
+  createdBy User @relation("RoomCreator", fields: [createdById], references: [id], onDelete: Restrict)
 
   members     RoomMember[]
   messages    Message[]
@@ -171,10 +165,10 @@ model Room {
 // ==========================================
 
 model RoomMember {
-  roomId   String
-  userId   String
+  roomId String
+  userId String
 
-  role     MemberRole @default(MEMBER)
+  role MemberRole @default(MEMBER)
 
   joinedAt DateTime @default(now())
 
@@ -182,17 +176,8 @@ model RoomMember {
   // Intentionally not a foreign key.
   lastReadMessageId String?
 
-  room Room @relation(
-    fields: [roomId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  user User @relation(
-    fields: [userId],
-    references: [id],
-    onDelete: Cascade
-  )
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([roomId, userId])
   @@index([userId])
@@ -215,17 +200,8 @@ model RoomPreference {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  room Room @relation(
-    fields: [roomId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  user User @relation(
-    fields: [userId],
-    references: [id],
-    onDelete: Cascade
-  )
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([roomId, userId])
   @@index([userId, isPinned])
@@ -238,45 +214,30 @@ model RoomPreference {
 // ==========================================
 
 model Message {
-  id              String   @id @default(uuid(7))
+  id String @id @default(uuid(7))
 
-  roomId          String
-  senderId        String
+  roomId   String
+  senderId String
 
   // Client-generated ID for idempotent retries.
   clientMessageId String
 
   // Nullable to support attachment-only messages.
-  body            String?
+  body String?
 
   // Reply to another message.
-  replyToId       String?
+  replyToId String?
 
   // Server node that handled the message.
-  nodeId          String
+  nodeId String
 
-  createdAt       DateTime @default(now())
-  editedAt        DateTime?
-  deletedAt       DateTime?
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+  deletedAt DateTime?
 
-  room Room @relation(
-    fields: [roomId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  sender User @relation(
-    fields: [senderId],
-    references: [id],
-    onDelete: Restrict
-  )
-
-  replyTo Message? @relation(
-    "Replies",
-    fields: [replyToId],
-    references: [id],
-    onDelete: SetNull
-  )
+  room    Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender  User     @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  replyTo Message? @relation("Replies", fields: [replyToId], references: [id], onDelete: SetNull)
 
   replies     Message[]         @relation("Replies")
   attachments Attachment[]
@@ -285,10 +246,8 @@ model Message {
 
   // Prevent duplicate messages when clients retry requests.
   @@unique([roomId, senderId, clientMessageId])
-
   // Efficient chronological message retrieval.
   @@index([roomId, createdAt(sort: Desc), id(sort: Desc)])
-
   @@index([senderId])
   @@index([replyToId])
   @@map("message")
@@ -299,12 +258,12 @@ model Message {
 // ==========================================
 
 model MessageReceipt {
-  id        String        @id @default(uuid(7))
+  id String @id @default(uuid(7))
 
   messageId String
   userId    String
 
-  status    ReceiptStatus @default(DELIVERED)
+  status ReceiptStatus @default(DELIVERED)
 
   deliveredAt DateTime?
   readAt      DateTime?
@@ -312,21 +271,11 @@ model MessageReceipt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  message Message @relation(
-    fields: [messageId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  user User @relation(
-    fields: [userId],
-    references: [id],
-    onDelete: Cascade
-  )
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // One receipt per recipient per message.
   @@unique([messageId, userId])
-
   @@index([userId, status])
   @@index([messageId, status])
   @@map("message_receipt")
@@ -337,31 +286,21 @@ model MessageReceipt {
 // ==========================================
 
 model MessageReaction {
-  id        String   @id @default(uuid(7))
+  id String @id @default(uuid(7))
 
   messageId String
   userId    String
 
   // Stores the selected reaction, e.g. an emoji.
-  emoji     String
+  emoji String
 
   createdAt DateTime @default(now())
 
-  message Message @relation(
-    fields: [messageId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  user User @relation(
-    fields: [userId],
-    references: [id],
-    onDelete: Cascade
-  )
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // A user cannot add the same reaction twice to one message.
   @@unique([messageId, userId, emoji])
-
   @@index([messageId])
   @@index([userId])
   @@map("message_reaction")
@@ -399,11 +338,7 @@ model Media {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  uploadedBy User @relation(
-    fields: [uploadedById],
-    references: [id],
-    onDelete: Restrict
-  )
+  uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
 
   attachments Attachment[]
 
@@ -425,21 +360,11 @@ model Attachment {
 
   createdAt DateTime @default(now())
 
-  message Message @relation(
-    fields: [messageId],
-    references: [id],
-    onDelete: Cascade
-  )
-
-  media Media @relation(
-    fields: [mediaId],
-    references: [id],
-    onDelete: Restrict
-  )
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  media   Media   @relation(fields: [mediaId], references: [id], onDelete: Restrict)
 
   // Prevent attaching the same media twice to one message.
   @@unique([messageId, mediaId])
-
   @@index([messageId])
   @@index([mediaId])
   @@map("attachment")
