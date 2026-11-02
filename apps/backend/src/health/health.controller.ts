@@ -2,6 +2,8 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { getNodeId } from '../common/utils/node-id.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { RedisService } from '../realtime/redis.service.js';
 
 export interface HealthLiveResponse {
   status: 'ok';
@@ -24,6 +26,11 @@ export interface HealthNodeResponse {
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
   /**
    * Basic liveness probe indicating the HTTP process is alive and responsive.
    */
@@ -40,13 +47,27 @@ export class HealthController {
   @Public()
   @ApiOperation({ summary: 'Readiness probe checking database and redis' })
   @Get('ready')
-  getReady(): HealthReadyResponse {
-    // TODO(impl): Perform lightweight ping queries to prisma ($queryRaw`SELECT 1`) and redis.ping()
+  async getReady(): Promise<HealthReadyResponse> {
+    let database: 'up' | 'down' = 'up';
+    let redis: 'up' | 'down' = 'up';
+
+    try {
+      await this.prisma.$queryRawUnsafe('SELECT 1');
+    } catch {
+      database = 'down';
+    }
+
+    try {
+      await this.redis.ping();
+    } catch {
+      redis = 'down';
+    }
+
     return {
-      status: 'ok',
+      status: database === 'up' && redis === 'up' ? 'ok' : 'degraded',
       checks: {
-        database: 'up',
-        redis: 'up',
+        database,
+        redis,
       },
     };
   }
