@@ -1,9 +1,24 @@
+
 import { Module } from '@nestjs/common';
-import { AuthController } from './auth.controller.js';
-import { AuthService } from './auth.service.js';
+import {
+  AuthModule as BetterAuthNestModule,
+} from '@thallesp/nestjs-better-auth';
+
+import { PrismaModule } from '../prisma/prisma.module.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { createBetterAuth } from './better-auth.js';
 
 @Module({
-  controllers: [AuthController],
-  providers: [AuthService]
+  imports: [
+    PrismaModule,
+
+    BetterAuthNestModule.forRootAsync({
+      imports: [PrismaModule],
+      inject: [PrismaService],
+      useFactory: (prisma: PrismaService) => ({
+        auth: createBetterAuth(prisma),
+      }),
+    }),
+  ],
 })
 export class AuthModule {}
