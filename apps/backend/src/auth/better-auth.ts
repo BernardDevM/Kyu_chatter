@@ -1,29 +1,27 @@
+
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { bearer } from 'better-auth/plugins';
 import { getAllowedOrigins } from '../common/utils/cors.util.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 
-function envWithDefault(name: string, fallback: string): string {
+function requiredEnv(name: string): string {
   const value = process.env[name];
+
   if (!value) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(`Missing required environment variable: ${name}`);
-    }
-    return fallback;
+    throw new Error(`Missing required environment variable: ${name}`);
   }
+
   return value;
 }
 
 export function createBetterAuth(prisma: PrismaService) {
-  const googleClientId = process.env.GOOGLE_CLIENT_ID;
-  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
-
   return betterAuth({
     appName: 'Kyu Chatter',
 
-    baseURL: envWithDefault('BETTER_AUTH_URL', 'http://localhost:3000'),
-    secret: envWithDefault('BETTER_AUTH_SECRET', 'dev-secret-kyu-chatter-12345678'),
+    baseURL: requiredEnv('BETTER_AUTH_URL'),
+
+    secret: requiredEnv('BETTER_AUTH_SECRET'),
 
     trustedOrigins: getAllowedOrigins(),
 
@@ -37,14 +35,11 @@ export function createBetterAuth(prisma: PrismaService) {
       enabled: true,
     },
 
-    socialProviders:
-      googleClientId && googleClientSecret
-        ? {
-            google: {
-              clientId: googleClientId,
-              clientSecret: googleClientSecret,
-            },
-          }
-        : {},
+    socialProviders: {
+      google: {
+        clientId: requiredEnv('GOOGLE_CLIENT_ID'),
+        clientSecret: requiredEnv('GOOGLE_CLIENT_SECRET'),
+      },
+    },
   });
 }
