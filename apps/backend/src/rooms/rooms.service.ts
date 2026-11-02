@@ -70,6 +70,11 @@ export class RoomsService {
       image: room.image,
       lastMessage: null,
       unreadCount: 0,
+      preference: {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+      },
       preferences: {
         isMuted: false,
         isArchived: false,
