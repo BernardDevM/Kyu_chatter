@@ -18,6 +18,7 @@ export const WS_SERVER_EVENTS = {
   MESSAGE_NEW: 'message:new',
   MESSAGE_UPDATED: 'message:updated',
   MESSAGE_DELETED: 'message:deleted',
+  MESSAGE_READ: 'message:read',
   REACTION_UPDATED: 'reaction:updated',
   TYPING: 'typing',
   PRESENCE_UPDATE: 'presence:update',
