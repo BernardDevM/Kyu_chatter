@@ -1,5 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { bearer } from 'better-auth/plugins';
+import { getAllowedOrigins } from '../common/utils/cors.util.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 
 function envWithDefault(name: string, fallback: string): string {
@@ -14,11 +16,6 @@ function envWithDefault(name: string, fallback: string): string {
 }
 
 export function createBetterAuth(prisma: PrismaService) {
-  const frontendOrigins = (process.env.FRONTEND_URLS ?? process.env.FRONTEND_URL ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
   const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
@@ -28,11 +25,13 @@ export function createBetterAuth(prisma: PrismaService) {
     baseURL: envWithDefault('BETTER_AUTH_URL', 'http://localhost:3000'),
     secret: envWithDefault('BETTER_AUTH_SECRET', 'dev-secret-kyu-chatter-12345678'),
 
-    trustedOrigins: frontendOrigins.length > 0 ? frontendOrigins : ['http://localhost:3000', 'http://localhost:5173'],
+    trustedOrigins: getAllowedOrigins(),
 
     database: prismaAdapter(prisma, {
       provider: 'postgresql',
     }),
+
+    plugins: [bearer()],
 
     emailAndPassword: {
       enabled: true,

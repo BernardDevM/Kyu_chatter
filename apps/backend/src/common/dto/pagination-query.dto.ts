@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 /**
@@ -7,6 +7,7 @@ import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 export class PaginationQueryDto {
   /** Optional UUID cursor representing the last seen item */
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
   @IsUUID('all')
   cursor?: string;
 

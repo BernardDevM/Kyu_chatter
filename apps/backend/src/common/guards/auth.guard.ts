@@ -97,7 +97,7 @@ export class AuthGuard implements CanActivate {
       const devHeader = request?.headers?.['x-dev-user-id'];
       let devUserId = Array.isArray(devHeader) ? devHeader[0] : devHeader;
 
-      if (!devUserId && request?.headers?.authorization?.startsWith('Bearer ')) {
+      if (!devUserId && request?.headers?.authorization?.startsWith('Bearer dev-')) {
         const bearer = request.headers.authorization.slice(7).trim();
         if (bearer.length > 0) {
           devUserId = bearer;

@@ -14,11 +14,11 @@ export interface RoomSummaryResponse {
   name: string | null;
   description: string | null;
   image: string | null;
+  memberCount: number;
   lastMessage: MessageResponse | null;
   unreadCount: number;
-  preferences: RoomPreferenceResponse;
-  /** @deprecated Use `preferences`. */
-  preference?: RoomPreferenceResponse;
+  preference: RoomPreferenceResponse;
+  preferences?: RoomPreferenceResponse;
   otherUser?: UserSummaryResponse;
   updatedAt: string;
 }
@@ -26,6 +26,7 @@ export interface RoomSummaryResponse {
 export interface RoomPageResponse {
   items: RoomSummaryResponse[];
   nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export interface RoomDetailResponse extends RoomSummaryResponse {
