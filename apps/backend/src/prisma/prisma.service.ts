@@ -9,6 +9,9 @@ import {
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
 import pg from 'pg';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { PrismaClient } from '../generated/prisma/client.js';
+import { dbPool, prismaAdapterInstance } from './prisma.client.js';
 
 @Injectable()
 export class PrismaService
@@ -45,6 +48,9 @@ export class PrismaService
     });
 
     this.pool = pool;
+
+  constructor() {
+    super({ adapter: prismaAdapterInstance });
   }
 
   async onModuleInit() {
@@ -68,6 +74,6 @@ export class PrismaService
 
   async onModuleDestroy() {
     await this.$disconnect();
-    await this.pool.end();
+    await dbPool.end();
   }
 }

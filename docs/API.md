@@ -69,21 +69,62 @@ Exceptions and validation failures are caught globally by `AllExceptionsFilter` 
 - **User IDs**: Plain strings (Better Auth generated IDs, `1` to `64` characters, e.g. `usr_123456789`).
 - **Domain IDs**: UUIDv7 strings (`roomId`, `messageId`, `mediaId`, `attachmentId`), validated via `@IsUUID('all')`.
 
+### 1.7 Guards & Access Control Architecture
+- **`AuthGuard`** (Registered globally via `APP_GUARD`):
+  - Automatically intercepts all requests.
+  - Verifies Better Auth session cookie or Bearer token using `auth.api.getSession(...)`.
+  - In non-production environments with `ALLOW_DEV_USER_HEADER=true`, accepts the `x-dev-user-id` header to inject a dev user.
+  - Skips authentication on routes marked `@Public()` or `@AllowAnonymous()`, and on `/health/*`, `/api/docs*`, and `/api/auth/*`.
+- **`RoomMemberGuard`**:
+  - Enforces that the authenticated user is a verified member of the target `roomId`.
+- **`RoomAdminGuard`**:
+  - Enforces that the authenticated user has either `ADMIN` or `OWNER` role within `roomId`.
+- **`RoomOwnerGuard`**:
+  - Restricts critical operations (e.g., room deletion, member role changes) strictly to the room `OWNER`.
+- **`WsAuthGuard`**:
+  - Verifies session credentials from Socket.IO handshake headers (`cookie`) or auth token.
+- **`WsThrottleGuard`**:
+  - Enforces a sliding window rate limit of 30 WebSocket events per 5 seconds per socket/user using atomic Redis counters (`ratelimit:ws:...`), falling back gracefully to an in-memory window if Redis is unavailable.
+
+### 1.8 Distributed Realtime & Redis Architecture
+- **Stateless API Nodes**: Any node can serve any user or WebSocket connection.
+- **Socket.IO Redis Adapter**: Backplane created via `@socket.io/redis-adapter` and `ioredis` pub/sub clients. Emitting to `server.to(roomId).emit(...)` distributes events across all cluster nodes.
+- **Redis Presence Engine**:
+  - Sockets register into a Redis sorted set `presence:{userId}` with score equal to connection timestamp (`now`).
+  - Periodic heartbeats (`presence:heartbeat`) update the score and refresh the 120s key TTL.
+  - Expired connections are pruned (`ZREMRANGEBYSCORE presence:{userId} 0 <now - 60s>`).
+  - When the last active socket disconnects (`ZCARD === 0`), `lastSeenAt` is automatically persisted to PostgreSQL, and `presence:update` (`online: false`) is broadcast.
+- **Ephemeral State**: Typing events (`typing:start`, `typing:stop`) are broadcast immediately through Redis pub/sub and never touch PostgreSQL.
+
 ---
 
-## 2. Health Endpoints
+## 2. Authentication Endpoints (`/api/auth/*` — Better Auth)
+
+Better Auth manages user registration, session cookies, and credentials with PostgreSQL persistence.
+
+| Method | Path | Request Body | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/sign-up/email` | `{"email": "...", "password": "...", "name": "...", "image": "..."}` | Register new user, hashes password, sets `better-auth.session_token` cookie |
+| `POST` | `/api/auth/sign-in/email` | `{"email": "...", "password": "..."}` | Sign in with email and password, sets session cookie |
+| `POST` | `/api/auth/sign-out` | `{}` | Invalidate active session and clear session cookie (requires `Origin` header) |
+| `GET` | `/api/auth/get-session` | None (reads cookie/Bearer) | Return active user and session metadata (`{"session": {...}, "user": {...}}`) |
+| `GET` | `/api/auth/ok` | None | Health and liveness probe for the auth subsystem |
+
+---
+
+## 3. Health Endpoints
 
 Health checks are public endpoints used by Docker, load balancers, and orchestrators. They bypass the response envelope.
 
 | Method | Path | Status | Response Shape | Description |
 |---|---|---|---|---|
 | `GET` | `/health/live` | 200 | `{"status": "ok"}` | Liveness probe (process responsive) |
-| `GET` | `/health/ready` | 200 | `{"status": "ok", "db": "ok"}` | Readiness probe (database connection active) |
-| `GET` | `/health/node` | 200 | `{"nodeId": "node-1"}` | Returns current node identifier |
+| `GET` | `/health/ready` | 200/503 | `{"status": "ok"\|"degraded", "checks": {"database": "up"\|"down", "redis": "up"\|"down"}}` | Readiness probe (verifies database `SELECT 1` and `redis.ping()`) |
+| `GET` | `/health/node` | 200 | `{"nodeId": "node-1", "uptimeSeconds": 120, "timestamp": "..."}` | Returns current node identifier and system uptime |
 
 ---
 
-## 3. Users Endpoints (`/api/users`)
+## 4. Users Endpoints (`/api/users`)
 
 ### 3.1 Get Current User
 - **Method / Path**: `GET /api/users/me`
@@ -140,7 +181,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ---
 
-## 4. Presence Endpoints (`/api/presence`)
+## 5. Presence Endpoints (`/api/presence`)
 
 ### 4.1 Batch Query Presence
 - **Method / Path**: `GET /api/presence?userIds=usr_1,usr_2`
@@ -162,7 +203,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ---
 
-## 5. Rooms Endpoints (`/api/rooms`)
+## 6. Rooms Endpoints (`/api/rooms`)
 
 ### 5.1 Create Group Room
 - **Method / Path**: `POST /api/rooms`
@@ -331,7 +372,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ---
 
-## 6. Messages Endpoints
+## 7. Messages Endpoints
 
 Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages`) or directly by message ID (`/api/messages/:messageId`).
 
@@ -450,7 +491,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
 
 ---
 
-## 7. Media Endpoints (`/api/media`)
+## 8. Media Endpoints (`/api/media`)
 
 Direct uploads bypass backend file streams by generating a presigned Cloudinary upload signature.
 
@@ -518,41 +559,42 @@ Direct uploads bypass backend file streams by generating a presigned Cloudinary 
 
 ---
 
-## 8. WebSocket Gateway & Events
+## 9. WebSocket Gateway & Events
 
-The WebSocket gateway is exposed via Socket.IO (`ChatGateway`). Incoming payloads are automatically validated using NestJS `ValidationPipe`.
+The WebSocket gateway is exposed via Socket.IO (`ChatGateway`) backed by a Redis pub/sub adapter (`@socket.io/redis-adapter`) for cross-node message delivery. Incoming payloads are automatically validated using NestJS `ValidationPipe`.
 
-### 8.1 Client-to-Server Events (`WS_CLIENT_EVENTS`)
+### 9.1 Client-to-Server Events (`WS_CLIENT_EVENTS`)
 
 | Event Name | DTO Class | Payload Fields & Validation | Server Ack / Response |
 |---|---|---|---|
 | `room:join` | `JoinRoomWsDto` | `roomId` (`@IsUUID('all')`) | `{ ok: true, roomId }` |
 | `room:leave` | `LeaveRoomWsDto` | `roomId` (`@IsUUID('all')`) | `{ ok: true, roomId }` |
-| `message:send` | `SendMessageWsDto` | `roomId` (`UUID`), `clientMessageId` (`UUID`), `body?` (1-4000), `replyToId?` (`UUID`), `mediaIds?` (`UUID[]`). *Body or mediaIds required.* | `{ ok: true, clientMessageId }` |
-| `message:read` | `MarkReadWsDto` | `roomId` (`UUID`), `messageId` (`UUID`) | `{ ok: true, messageId }` |
+| `message:send` | `SendMessageWsDto` | `roomId` (`UUID`), `clientMessageId` (`UUID`), `body?` (1-2000), `replyToId?` (`UUID`), `mediaIds?` (`UUID[]`). *Body or mediaIds required.* | `{ ok: true, data: MessageObject }` |
+| `message:read` | `MarkReadWsDto` | `roomId` (`UUID`), `messageId` (`UUID`) | `{ ok: true }` |
 | `typing:start` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` |
 | `typing:stop` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` |
-| `room:sync` | `ResyncWsDto` | `roomId` (`UUID`), `afterMessageId?` (`UUID`) | `{ ok: true, roomId }` |
+| `rooms:resync` | `ResyncWsDto` | `rooms`: Array of `{ roomId: string, lastMessageId?: string }` | `{ ok: true, rooms: [...] }` |
+| `presence:heartbeat` | None | None | `{ ok: true }` |
 
-### 8.2 Server-to-Client Events (`WS_SERVER_EVENTS`)
+### 9.2 Server-to-Client Events (`WS_SERVER_EVENTS`)
 
 | Event Name | Broadcast Scope | Payload Schema | Description |
 |---|---|---|---|
-| `message:new` | Room members | `MessageResponse` | Broadcast when a new message is posted |
-| `message:updated` | Room members | `MessageResponse` | Broadcast when an existing message is edited |
-| `message:deleted` | Room members | `{ messageId: string, roomId: string }` | Broadcast when a message is soft-deleted |
-| `message:reaction` | Room members | `{ messageId: string, reactions: ReactionSummaryResponse[] }` | Broadcast when a reaction is added or removed |
-| `message:receipt` | Room members | `ReceiptResponse` | Broadcast when a message is delivered or read |
-| `typing:change` | Room members (excl. sender) | `{ roomId: string, userId: string, isTyping: boolean }` | Broadcast when a user starts or stops typing |
-| `presence:change` | Subscribed peers / Contacts | `{ userId: string, status: 'ONLINE' \| 'OFFLINE', lastSeenAt?: string }` | Broadcast when user connectivity state changes |
-| `room:member_joined` | Room members | `RoomMemberResponse` | Broadcast when a new member is added |
-| `room:member_left` | Room members | `{ roomId: string, userId: string }` | Broadcast when a member leaves or is removed |
+| `message:new` | Room members (all nodes) | `MessageResponse` | Broadcast cross-node when a new message is posted |
+| `message:updated` | Room members (all nodes) | `MessageResponse` | Broadcast when an existing message is edited |
+| `message:deleted` | Room members (all nodes) | `{ messageId: string, roomId: string }` | Broadcast when a message is soft-deleted |
+| `message:read` | Room members (all nodes) | `{ roomId: string, userId: string, messageId: string }` | Broadcast when a member marks a message read |
+| `reaction:updated` | Room members (all nodes) | `{ messageId: string, reactions: ReactionSummaryResponse[] }` | Broadcast when a reaction is added or removed |
+| `typing` | Room members (excl. sender) | `{ roomId: string, userId: string, isTyping: boolean }` | Ephemeral broadcast when a user starts or stops typing |
+| `presence:update` | Cluster / Connected clients | `{ userId: string, online: boolean, lastSeenAt: string \| null }` | Broadcast when user connectivity state changes |
+| `member:joined` | Room members | `{ roomId: string, userId: string }` | Broadcast when a member joins the room |
+| `member:left` | Room members | `{ roomId: string, userId: string }` | Broadcast when a member leaves the room |
 | `room:updated` | Room members | `RoomDetailResponse` | Broadcast when room metadata changes |
 | `error` | Emitting socket | `{ code: string, message: string, details?: unknown }` | Sent on validation or operational errors |
 
 ---
 
-## 9. Error Codes Summary
+## 10. Error Codes Summary
 
 | Status Code | Meaning | Common Triggers |
 |---|---|---|
