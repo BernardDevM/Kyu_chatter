@@ -1,75 +1,32 @@
-# React + TypeScript + Vite
+# Kyu Chatter — web app (Paper)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React Router (SPA) + Tailwind 4 + shadcn/ui frontend for `apps/backend`.
+Contract: [`docs/API.md`](../../docs/API.md).
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+pnpm install
+cp .env.example .env     # VITE_API_BASE_URL -> backend, default http://localhost:3000
+pnpm dev                 # http://localhost:5174  (set backend FRONTEND_URL to match)
+pnpm typecheck && pnpm lint && pnpm build
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Dev login: with `ALLOW_DEV_USER_HEADER=true` on the backend, the sign-in page has a
+"dev login" box that acts as any user id (no password).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Layout
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```text
+app/
+├── routes/       Thin route files (flat routes): auth.*, chat, chat.$roomId
+├── features/     One folder per area: auth, rooms, messages, realtime, presence, users, media
+│   └── <name>/{api,components,hooks,schemas,stores,types,utils}
+├── components/   ui/ (shadcn), layout/ (shell, sidebar), states/ (loading, 404, errors)
+├── providers/    theme, realtime (socket lifetime), drawer (global dialogs)
+├── hooks/  lib/  generic hooks; axios client, query keys, helpers
+├── root.tsx  routes.ts  styles.css
 ```
+
+State: server data in React Query; socket events write straight into its cache
+(`features/realtime/hooks/use-realtime-events.ts`); UI/ephemeral state in zustand.
+
+`apps/frontend` is the same app with a different look (dark, Slack-style).

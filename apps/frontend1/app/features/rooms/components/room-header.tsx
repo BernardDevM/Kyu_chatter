@@ -1,0 +1,68 @@
+import { formatDistanceToNow } from "date-fns";
+import { ArrowLeft, Users } from "lucide-react";
+import { Link } from "react-router";
+
+import { Button } from "@/components/ui/button";
+import { useCurrentUser } from "@/features/auth/hooks/use-current-user";
+import { usePresence } from "@/features/presence/api/use-presence-service";
+import { UserAvatar } from "@/features/users/components/user-avatar";
+
+import type { RoomDetail } from "../types/room";
+import { getDirectPeerId, getRoomTitle } from "../utils/room-title";
+import { RoomMenu } from "./room-menu";
+
+export function RoomHeader({
+  room,
+  onShowMembers,
+}: {
+  room: RoomDetail;
+  onShowMembers: () => void;
+}) {
+  const me = useCurrentUser();
+  const title = getRoomTitle(room, room, me?.id);
+  const peerId = getDirectPeerId(room, me?.id);
+  const peer = room.members?.find((m) => m.userId === peerId)?.user;
+  const presence = usePresence(peerId);
+  const myRole = room.members?.find((m) => m.userId === me?.id)?.role;
+
+  const subtitle =
+    room.type === "GROUP"
+      ? `${room.memberCount} members`
+      : presence?.online
+        ? "Online"
+        : presence?.lastSeenAt
+          ? `Last seen ${formatDistanceToNow(new Date(presence.lastSeenAt), { addSuffix: true })}`
+          : "Offline";
+
+  return (
+    <header className="bg-card/80 flex shrink-0 items-center gap-3 border-b px-3 py-3 backdrop-blur md:px-6">
+      <Button variant="ghost" size="icon" className="rounded-full md:hidden" asChild>
+        <Link to="/chat" aria-label="Back to chats">
+          <ArrowLeft />
+        </Link>
+      </Button>
+      <button
+        type="button"
+        onClick={onShowMembers}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <UserAvatar
+          name={title}
+          image={room.type === "DIRECT" ? (peer?.image ?? room.image) : room.image}
+          userId={peerId}
+          className="size-11"
+        />
+        <span className="min-w-0">
+          <span className="font-display block truncate text-lg leading-tight font-semibold">
+            {title}
+          </span>
+          <span className="text-muted-foreground block truncate text-xs">{subtitle}</span>
+        </span>
+      </button>
+      <Button variant="ghost" size="icon" className="rounded-full" aria-label="Members and info" onClick={onShowMembers}>
+        <Users />
+      </Button>
+      <RoomMenu room={room} myRole={myRole} />
+    </header>
+  );
+}

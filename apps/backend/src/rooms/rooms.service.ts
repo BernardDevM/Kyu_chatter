@@ -37,6 +37,11 @@ export class RoomsService {
       image: dto.image ?? null,
       lastMessage: null,
       unreadCount: 0,
+      preference: {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+      },
       preferences: {
         isMuted: false,
         isArchived: false,
@@ -70,6 +75,11 @@ export class RoomsService {
       image: null,
       lastMessage: null,
       unreadCount: 0,
+      preference: {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+      },
       preferences: {
         isMuted: false,
         isArchived: false,
@@ -113,6 +123,11 @@ export class RoomsService {
           image: null,
           lastMessage: null,
           unreadCount: 0,
+          preference: {
+            isMuted: false,
+            isArchived: false,
+            isPinned: false,
+          },
           preferences: {
             isMuted: false,
             isArchived: false,
@@ -139,6 +154,11 @@ export class RoomsService {
       image: null,
       lastMessage: null,
       unreadCount: 0,
+      preference: {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+      },
       preferences: {
         isMuted: false,
         isArchived: false,
@@ -172,6 +192,11 @@ export class RoomsService {
       image: dto.image ?? null,
       lastMessage: null,
       unreadCount: 0,
+      preference: {
+        isMuted: false,
+        isArchived: false,
+        isPinned: false,
+      },
       preferences: {
         isMuted: false,
         isArchived: false,

@@ -16,7 +16,8 @@ export interface RoomSummaryResponse {
   image: string | null;
   lastMessage: MessageResponse | null;
   unreadCount: number;
-  preferences: RoomPreferenceResponse;
+  preference: RoomPreferenceResponse;
+  preferences?: RoomPreferenceResponse;
   otherUser?: UserSummaryResponse;
   updatedAt: string;
 }
