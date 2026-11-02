@@ -9,7 +9,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
+import { fromNodeHeaders } from 'better-auth/node';
+import { auth } from '../auth/auth.js';
 import { getNodeId } from '../common/utils/node-id.js';
+import { WsAuthGuard } from '../common/guards/ws-auth.guard.js';
 import { WsThrottleGuard } from '../common/guards/ws-throttle.guard.js';
 import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS } from './chat.events.js';
 import { PresenceService } from './presence.service.js';
@@ -27,7 +30,7 @@ import { ResyncWsDto } from './dto/ws/resync.ws-dto.js';
   },
   transports: ['websocket'],
 })
-@UseGuards(WsThrottleGuard)
+@UseGuards(WsAuthGuard, WsThrottleGuard)
 @UsePipes(
   new ValidationPipe({
     whitelist: true,
@@ -49,6 +52,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleConnection(client: Socket): Promise<void> {
     try {
       let user = (client.data as any)?.user;
+
+      if (!user) {
+        try {
+          const headers = fromNodeHeaders(client.handshake?.headers || {});
+          const session = await auth.api.getSession({ headers });
+          if (session?.user) {
+            user = session.user;
+          }
+        } catch {
+          // Continue to dev fallback
+        }
+      }
 
       if (!user) {
         const devHeader = client.handshake?.headers?.['x-dev-user-id'];

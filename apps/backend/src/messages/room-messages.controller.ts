@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -16,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
+import { RoomMemberGuard } from '../common/guards/room-member.guard.js';
 import { MessagesService } from './messages.service.js';
 import { SyncMessagesQueryDto } from './dto/sync-messages-query.dto.js';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto.js';
@@ -28,6 +30,7 @@ import type {
 @ApiTags('Messages')
 @ApiBearerAuth('session-auth')
 @ApiSecurity('dev-user-id')
+@UseGuards(RoomMemberGuard)
 @Controller('api/rooms/:roomId/messages')
 export class RoomMessagesController {
   constructor(private readonly messagesService: MessagesService) {}
