@@ -13,6 +13,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+# prisma.config.ts requires DATABASE_URL to load; generate never connects, so a placeholder is enough.
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" pnpm prisma generate
 RUN pnpm run build
 
 #--------PRODUCTION-------
