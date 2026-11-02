@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,6 +20,9 @@ import {
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { RoomMemberParamDto } from '../common/dto/room-member-param.dto.js';
+import { RoomMemberGuard } from '../common/guards/room-member.guard.js';
+import { RoomAdminGuard } from '../common/guards/room-admin.guard.js';
+import { RoomOwnerGuard } from '../common/guards/room-owner.guard.js';
 import { RoomsService } from './rooms.service.js';
 import { CreateGroupRoomDto } from './dto/create-group-room.dto.js';
 import { CreateDirectRoomDto } from './dto/create-direct-room.dto.js';
@@ -84,6 +88,7 @@ export class RoomsController {
    * Retrieves room details by ID.
    */
   @ApiOperation({ summary: 'Get room details and member list' })
+  @UseGuards(RoomMemberGuard)
   @Get(':roomId')
   async getRoom(
     @CurrentUser('id') userId: string,
@@ -96,6 +101,7 @@ export class RoomsController {
    * Updates group room attributes (name, description, image).
    */
   @ApiOperation({ summary: 'Update group room details' })
+  @UseGuards(RoomAdminGuard)
   @Patch(':roomId')
   async updateRoom(
     @CurrentUser('id') userId: string,
@@ -109,6 +115,7 @@ export class RoomsController {
    * Deletes a group room (owner only).
    */
   @ApiOperation({ summary: 'Delete a group room (owner only)' })
+  @UseGuards(RoomOwnerGuard)
   @Delete(':roomId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteRoom(
@@ -122,6 +129,7 @@ export class RoomsController {
    * Lists all members of a room.
    */
   @ApiOperation({ summary: 'List all members in a room' })
+  @UseGuards(RoomMemberGuard)
   @Get(':roomId/members')
   async listMembers(
     @CurrentUser('id') userId: string,
@@ -134,6 +142,7 @@ export class RoomsController {
    * Adds new members to a group room.
    */
   @ApiOperation({ summary: 'Add members to a group room' })
+  @UseGuards(RoomAdminGuard)
   @Post(':roomId/members')
   async addMembers(
     @CurrentUser('id') userId: string,
@@ -147,6 +156,7 @@ export class RoomsController {
    * Updates a member's role within a group room.
    */
   @ApiOperation({ summary: 'Update member role (ADMIN or MEMBER)' })
+  @UseGuards(RoomOwnerGuard)
   @Patch(':roomId/members/:userId')
   async updateMemberRole(
     @CurrentUser('id') userId: string,
@@ -165,6 +175,7 @@ export class RoomsController {
    * Removes a member from a room.
    */
   @ApiOperation({ summary: 'Remove a member from a room' })
+  @UseGuards(RoomAdminGuard)
   @Delete(':roomId/members/:userId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeMember(
@@ -182,6 +193,7 @@ export class RoomsController {
    * Leaves a room.
    */
   @ApiOperation({ summary: 'Leave a room' })
+  @UseGuards(RoomMemberGuard)
   @Post(':roomId/leave')
   @HttpCode(HttpStatus.NO_CONTENT)
   async leaveRoom(
@@ -195,6 +207,7 @@ export class RoomsController {
    * Updates user preferences (mute, archive, pin) for a room.
    */
   @ApiOperation({ summary: 'Update room preferences (mute/archive/pin)' })
+  @UseGuards(RoomMemberGuard)
   @Patch(':roomId/preferences')
   async updatePreferences(
     @CurrentUser('id') userId: string,
@@ -212,6 +225,7 @@ export class RoomsController {
    * Marks a room read up to a specific message ID.
    */
   @ApiOperation({ summary: 'Mark room read up to a message' })
+  @UseGuards(RoomMemberGuard)
   @Post(':roomId/read')
   async markRead(
     @CurrentUser('id') userId: string,
