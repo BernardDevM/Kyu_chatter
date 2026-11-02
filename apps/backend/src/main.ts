@@ -8,8 +8,14 @@ dns.setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  const frontendOrigins = (process.env.FRONTEND_URLS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL,
+    origin: frontendOrigins,
     credentials: true,
     exposedHeaders: ['X-Node-Id'],
   });
@@ -50,6 +56,8 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
-  console.log(`Server running on port ${port}. Swagger UI available at /api/docs`);
+  console.log(
+    `Server running on port ${port}. Swagger UI available at /api/docs`,
+  );
 }
 await bootstrap();
