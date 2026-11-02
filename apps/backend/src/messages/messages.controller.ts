@@ -10,6 +10,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { MessageIdParamDto } from '../common/dto/message-id-param.dto.js';
 import { MessagesService } from './messages.service.js';
@@ -22,6 +28,9 @@ import type {
   ReceiptResponse,
 } from './dto/message.response.js';
 
+@ApiTags('Messages')
+@ApiBearerAuth('session-auth')
+@ApiSecurity('dev-user-id')
 @Controller('api/messages')
 export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}
@@ -29,6 +38,7 @@ export class MessagesController {
   /**
    * Edits the body text of a message previously sent by the caller.
    */
+  @ApiOperation({ summary: 'Edit message body' })
   @Patch(':messageId')
   async editMessage(
     @CurrentUser('id') userId: string,
@@ -41,6 +51,7 @@ export class MessagesController {
   /**
    * Soft-deletes a message previously sent by the caller.
    */
+  @ApiOperation({ summary: 'Soft-delete message' })
   @Delete(':messageId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteMessage(
@@ -53,6 +64,7 @@ export class MessagesController {
   /**
    * Adds an emoji reaction to a message.
    */
+  @ApiOperation({ summary: 'Add emoji reaction to message' })
   @Post(':messageId/reactions')
   async addReaction(
     @CurrentUser('id') userId: string,
@@ -65,6 +77,7 @@ export class MessagesController {
   /**
    * Removes an emoji reaction from a message.
    */
+  @ApiOperation({ summary: 'Remove emoji reaction from message' })
   @Delete(':messageId/reactions')
   async removeReaction(
     @CurrentUser('id') userId: string,
@@ -77,6 +90,7 @@ export class MessagesController {
   /**
    * Retrieves read and delivery receipts for a message.
    */
+  @ApiOperation({ summary: 'Get message delivery and read receipts' })
   @Get(':messageId/receipts')
   async getReceipts(
     @CurrentUser('id') userId: string,

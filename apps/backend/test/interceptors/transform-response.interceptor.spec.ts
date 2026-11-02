@@ -74,6 +74,17 @@ describe('TransformResponseInterceptor', () => {
     expect(headers['X-Node-Id']).toBeDefined();
   });
 
+  it('skips envelope for /api/docs routes', async () => {
+    const { context, headers } = createMockContext('/api/docs', 200);
+    const handler: CallHandler = {
+      handle: () => of('<html>swagger</html>'),
+    };
+
+    const result = await firstValueFrom(interceptor.intercept(context, handler));
+    expect(result).toBe('<html>swagger</html>');
+    expect(headers['X-Node-Id']).toBeDefined();
+  });
+
   it('skips envelope for 204 No Content responses', async () => {
     const { context, headers } = createMockContext('/api/rooms/123', 204);
     const handler: CallHandler = {

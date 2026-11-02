@@ -10,6 +10,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { RoomMemberParamDto } from '../common/dto/room-member-param.dto.js';
@@ -30,6 +36,9 @@ import type {
   RoomPreferenceResponse,
 } from './dto/room.response.js';
 
+@ApiTags('Rooms')
+@ApiBearerAuth('session-auth')
+@ApiSecurity('dev-user-id')
 @Controller('api/rooms')
 export class RoomsController {
   constructor(private readonly roomsService: RoomsService) {}
@@ -37,6 +46,7 @@ export class RoomsController {
   /**
    * Creates a new group conversation room.
    */
+  @ApiOperation({ summary: 'Create a new group room' })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async createGroupRoom(
@@ -49,6 +59,7 @@ export class RoomsController {
   /**
    * Gets or creates a direct 1-on-1 room with another user.
    */
+  @ApiOperation({ summary: 'Create or get direct 1-on-1 chat room' })
   @Post('direct')
   async createDirectRoom(
     @CurrentUser('id') userId: string,
@@ -60,6 +71,7 @@ export class RoomsController {
   /**
    * Lists conversation rooms for the authenticated user with pagination and filters.
    */
+  @ApiOperation({ summary: 'List joined rooms with pagination and filters' })
   @Get()
   async listRooms(
     @CurrentUser('id') userId: string,
@@ -71,6 +83,7 @@ export class RoomsController {
   /**
    * Retrieves room details by ID.
    */
+  @ApiOperation({ summary: 'Get room details and member list' })
   @Get(':roomId')
   async getRoom(
     @CurrentUser('id') userId: string,
@@ -82,6 +95,7 @@ export class RoomsController {
   /**
    * Updates group room attributes (name, description, image).
    */
+  @ApiOperation({ summary: 'Update group room details' })
   @Patch(':roomId')
   async updateRoom(
     @CurrentUser('id') userId: string,
@@ -94,6 +108,7 @@ export class RoomsController {
   /**
    * Deletes a group room (owner only).
    */
+  @ApiOperation({ summary: 'Delete a group room (owner only)' })
   @Delete(':roomId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteRoom(
@@ -106,6 +121,7 @@ export class RoomsController {
   /**
    * Lists all members of a room.
    */
+  @ApiOperation({ summary: 'List all members in a room' })
   @Get(':roomId/members')
   async listMembers(
     @CurrentUser('id') userId: string,
@@ -117,6 +133,7 @@ export class RoomsController {
   /**
    * Adds new members to a group room.
    */
+  @ApiOperation({ summary: 'Add members to a group room' })
   @Post(':roomId/members')
   async addMembers(
     @CurrentUser('id') userId: string,
@@ -129,6 +146,7 @@ export class RoomsController {
   /**
    * Updates a member's role within a group room.
    */
+  @ApiOperation({ summary: 'Update member role (ADMIN or MEMBER)' })
   @Patch(':roomId/members/:userId')
   async updateMemberRole(
     @CurrentUser('id') userId: string,
@@ -146,6 +164,7 @@ export class RoomsController {
   /**
    * Removes a member from a room.
    */
+  @ApiOperation({ summary: 'Remove a member from a room' })
   @Delete(':roomId/members/:userId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeMember(
@@ -162,6 +181,7 @@ export class RoomsController {
   /**
    * Leaves a room.
    */
+  @ApiOperation({ summary: 'Leave a room' })
   @Post(':roomId/leave')
   @HttpCode(HttpStatus.NO_CONTENT)
   async leaveRoom(
@@ -174,6 +194,7 @@ export class RoomsController {
   /**
    * Updates user preferences (mute, archive, pin) for a room.
    */
+  @ApiOperation({ summary: 'Update room preferences (mute/archive/pin)' })
   @Patch(':roomId/preferences')
   async updatePreferences(
     @CurrentUser('id') userId: string,
@@ -190,6 +211,7 @@ export class RoomsController {
   /**
    * Marks a room read up to a specific message ID.
    */
+  @ApiOperation({ summary: 'Mark room read up to a message' })
   @Post(':roomId/read')
   async markRead(
     @CurrentUser('id') userId: string,
