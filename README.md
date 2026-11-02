@@ -278,7 +278,7 @@ Items marked *(planned)* do not exist yet.
 │  │  │  ├─ chat/                WebSocket gateway, socket event names, presence and typing services
 │  │  │  │  └─ dto/ws/           Payload shapes for each socket event
 │  │  │  ├─ realtime/            Redis connection and Socket.IO Redis adapter (to be built)
-│  │  │  ├─ health/              /health/live, /health/ready, /health/node for Traefik and demos
+│  │  │  ├─ health/              /health/live, /health/ready, /health/node for Traefik and demos; /ping for uptime monitors
 │  │  │  └─ generated/prisma/    Generated Prisma client. Git-ignored; create it with `pnpm prisma generate`
 │  │  ├─ test/                   Vitest tests: DTO validation, filter, interceptor, load-test script
 │  │  ├─ .env.example            Template for your local .env
@@ -392,7 +392,8 @@ Open <http://localhost:3000/api/docs> for the interactive Swagger UI.
   `x-dev-user-id: <any-id>`. Once real queries exist, that user must exist in the `user` table (create one in
   `pnpm prisma studio`). This fallback is removed when guards are added.
 - **Routes live under `/api/...`** (for example `/api/rooms`). `/api/auth/*` belongs to Better Auth. Health routes are
-  at `/health/*`.
+  at `/health/*`. `/ping` answers GET, HEAD and OPTIONS with a `SELECT 1` (200/204, or 503 if the database is down)
+  for uptime monitors such as UptimeRobot.
 
 ## Contributing
 

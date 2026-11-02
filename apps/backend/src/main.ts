@@ -3,12 +3,17 @@ import dns from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
+import { createPingHandler } from './health/ping.handler.js';
+import { PrismaService } from './prisma/prisma.service.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
 
 dns.setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  // Before enableCors(): CORS would answer OPTIONS /ping without hitting the DB.
+  app.use('/ping', createPingHandler(app.get(PrismaService)));
 
   const frontendOrigins = (process.env.FRONTEND_URLS ?? '')
     .split(',')
