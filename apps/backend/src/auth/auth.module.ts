@@ -12,6 +12,7 @@ import { createBetterAuth } from './better-auth.js';
   imports: [
     PrismaModule,
 
+    
     BetterAuthNestModule.forRootAsync({
       disableGlobalAuthGuard: true,
       imports: [PrismaModule],
@@ -23,3 +24,4 @@ import { createBetterAuth } from './better-auth.js';
   ],
 })
 export class AuthModule {}
+

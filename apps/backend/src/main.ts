@@ -8,6 +8,8 @@ import { PrismaService } from './prisma/prisma.service.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
 import { corsOriginCallback } from './common/utils/cors.util.js';
 
+
+
 dns.setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
