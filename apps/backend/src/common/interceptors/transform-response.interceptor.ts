@@ -39,7 +39,9 @@ export class TransformResponseInterceptor<T>
     const isSkippedPath =
       path.startsWith('/api/auth') ||
       path.startsWith('/health') ||
-      path === '/health';
+      path === '/health' ||
+      path.startsWith('/api/docs') ||
+      path.startsWith('/docs');
 
     return next.handle().pipe(
       map((data) => {

@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { getNodeId } from '../common/utils/node-id.js';
 
@@ -20,12 +21,14 @@ export interface HealthNodeResponse {
   timestamp: string;
 }
 
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
   /**
    * Basic liveness probe indicating the HTTP process is alive and responsive.
    */
   @Public()
+  @ApiOperation({ summary: 'Liveness probe' })
   @Get('live')
   getLive(): HealthLiveResponse {
     return { status: 'ok' };
@@ -35,6 +38,7 @@ export class HealthController {
    * Readiness probe checking dependencies (database, Redis cache).
    */
   @Public()
+  @ApiOperation({ summary: 'Readiness probe checking database and redis' })
   @Get('ready')
   getReady(): HealthReadyResponse {
     // TODO(impl): Perform lightweight ping queries to prisma ($queryRaw`SELECT 1`) and redis.ping()
@@ -51,6 +55,7 @@ export class HealthController {
    * Node diagnostic probe returning cluster node identifier and uptime.
    */
   @Public()
+  @ApiOperation({ summary: 'Node identity and uptime probe' })
   @Get('node')
   getNode(): HealthNodeResponse {
     return {

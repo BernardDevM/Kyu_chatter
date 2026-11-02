@@ -8,6 +8,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { MessagesService } from './messages.service.js';
@@ -19,6 +25,9 @@ import type {
   MessageResponse,
 } from './dto/message.response.js';
 
+@ApiTags('Messages')
+@ApiBearerAuth('session-auth')
+@ApiSecurity('dev-user-id')
 @Controller('api/rooms/:roomId/messages')
 export class RoomMessagesController {
   constructor(private readonly messagesService: MessagesService) {}
@@ -27,6 +36,7 @@ export class RoomMessagesController {
    * Resynchronizes messages created after a given message ID (oldest first).
    * Declared before root and parameterized routes to prevent route collisions.
    */
+  @ApiOperation({ summary: 'Resync missed messages after disconnect' })
   @Get('sync')
   async syncMessages(
     @CurrentUser('id') userId: string,
@@ -39,6 +49,7 @@ export class RoomMessagesController {
   /**
    * Retrieves paginated chronological message history for a room (newest first).
    */
+  @ApiOperation({ summary: 'Paginate message history in a room' })
   @Get()
   async listMessages(
     @CurrentUser('id') userId: string,
@@ -51,6 +62,7 @@ export class RoomMessagesController {
   /**
    * Sends a message into the room (REST fallback to WebSocket delivery).
    */
+  @ApiOperation({ summary: 'Send message to a room via REST' })
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async sendMessage(
