@@ -186,6 +186,7 @@ export class RoomsService {
         ? this.mapMessageToResponse(room.messages[0], userId)
         : null,
       unreadCount,
+      preference: this.extractPreferences(room.preferences[0]),
       preferences: this.extractPreferences(room.preferences[0]),
       otherUser: {
         id: otherUser.id,
@@ -267,10 +268,9 @@ export class RoomsService {
 
     const limit = query.limit ?? 30;
     const pageMemberships = filtered.slice(startIndex, startIndex + limit);
+    const hasMore = startIndex + limit < filtered.length;
     const nextCursor =
-      startIndex + limit < filtered.length
-        ? pageMemberships[pageMemberships.length - 1]?.room.id ?? null
-        : null;
+      hasMore ? pageMemberships[pageMemberships.length - 1]?.room.id ?? null : null;
 
     const items = await Promise.all(
       pageMemberships.map(async (m) => {
@@ -304,8 +304,10 @@ export class RoomsService {
           name: room.name,
           description: room.description,
           image: room.image,
+          memberCount: room.members.length,
           lastMessage,
           unreadCount,
+          preference: pref,
           preferences: pref,
           otherUser,
           updatedAt: room.updatedAt.toISOString(),
@@ -316,6 +318,7 @@ export class RoomsService {
     return {
       items,
       nextCursor,
+      hasMore,
     };
   }
 
@@ -384,6 +387,7 @@ export class RoomsService {
         ? this.mapMessageToResponse(room.messages[0], userId)
         : null,
       unreadCount,
+      preference: this.extractPreferences(room.preferences[0]),
       preferences: this.extractPreferences(room.preferences[0]),
       otherUser,
       directKey: room.directKey,
@@ -855,6 +859,7 @@ export class RoomsService {
     return {
       id: msg.id,
       roomId: msg.roomId,
+      senderId: msg.senderId ?? msg.sender?.id,
       sender: {
         id: msg.sender.id,
         name: msg.sender.name,
@@ -862,6 +867,7 @@ export class RoomsService {
       },
       clientMessageId: msg.clientMessageId,
       body: msg.body,
+      replyToId: msg.replyToId ?? (msg.replyTo ? msg.replyTo.id : null),
       replyTo: msg.replyTo
         ? {
             id: msg.replyTo.id,
@@ -878,7 +884,7 @@ export class RoomsService {
           url: att.media.url,
           originalName: att.media.originalName,
           mimeType: att.media.mimeType,
-          bytes: att.media.bytes,
+          bytes: Number(att.media.bytes),
           width: att.media.width,
           height: att.media.height,
           duration: att.media.duration,

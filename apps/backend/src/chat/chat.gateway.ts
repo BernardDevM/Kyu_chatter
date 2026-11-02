@@ -11,24 +11,28 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { fromNodeHeaders } from 'better-auth/node';
 import { auth } from '../auth/auth.js';
-import { getNodeId } from '../common/utils/node-id.js';
 import { WsAuthGuard } from '../common/guards/ws-auth.guard.js';
 import { WsThrottleGuard } from '../common/guards/ws-throttle.guard.js';
 import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS } from './chat.events.js';
 import { PresenceService } from './presence.service.js';
+import { TypingService } from './typing.service.js';
+import { MessagesService } from '../messages/messages.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { ReceiptStatus } from '../generated/prisma/enums.js';
 import { JoinRoomWsDto } from './dto/ws/join-room.ws-dto.js';
 import { LeaveRoomWsDto } from './dto/ws/leave-room.ws-dto.js';
 import { SendMessageWsDto } from './dto/ws/send-message.ws-dto.js';
 import { MarkReadWsDto } from './dto/ws/mark-read.ws-dto.js';
 import { TypingWsDto } from './dto/ws/typing.ws-dto.js';
 import { ResyncWsDto } from './dto/ws/resync.ws-dto.js';
+import { corsOriginCallback } from '../common/utils/cors.util.js';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL,
+    origin: corsOriginCallback,
     credentials: true,
   },
-  transports: ['websocket'],
+  transports: ['websocket', 'polling'],
 })
 @UseGuards(WsAuthGuard, WsThrottleGuard)
 @UsePipes(
@@ -44,7 +48,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatGateway.name);
 
-  constructor(private readonly presenceService: PresenceService) {}
+  constructor(
+    private readonly presenceService: PresenceService,
+    private readonly typingService: TypingService,
+    private readonly messagesService: MessagesService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * Connection hook - attaches user session and registers Redis presence.
@@ -176,54 +185,83 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Receives and broadcasts a new chat message cross-node via Redis.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.MESSAGE_SEND)
-  handleSendMessage(
+  async handleSendMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SendMessageWsDto,
-  ): { ok: true; data: any } {
+  ): Promise<{ ok: boolean; data?: any; error?: string }> {
     const user = (client?.data as any)?.user;
-    const message = {
-      id: crypto.randomUUID(),
-      roomId: payload.roomId,
-      sender: {
-        id: user?.id ?? 'anonymous',
-        name: user?.name ?? 'User',
-        image: user?.image ?? null,
-      },
-      clientMessageId: payload.clientMessageId,
-      body: payload.body,
-      replyTo: payload.replyToId ? { id: payload.replyToId } : null,
-      attachments: (payload.mediaIds ?? []).map((id) => ({ id, url: '' })),
-      reactions: [],
-      nodeId: getNodeId(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Cross-node broadcast via Socket.IO Redis adapter
-    if (this.server) {
-      this.server.to(payload.roomId).emit(WS_SERVER_EVENTS.MESSAGE_NEW, message);
+    if (!user?.id) {
+      return { ok: false, error: 'Unauthorized' };
     }
-    this.logger.log(
-      `Broadcast message ${payload.clientMessageId} to room ${payload.roomId} across cluster`,
-    );
-    return { ok: true, data: message };
+
+    try {
+      const message = await this.messagesService.sendMessage(
+        user.id,
+        payload.roomId,
+        payload,
+      );
+
+      // Cross-node broadcast via Socket.IO Redis adapter
+      if (this.server) {
+        this.server.to(payload.roomId).emit(WS_SERVER_EVENTS.MESSAGE_NEW, message);
+      }
+      this.logger.log(
+        `Broadcast message ${payload.clientMessageId} to room ${payload.roomId} across cluster`,
+      );
+      return { ok: true, data: message };
+    } catch (err: any) {
+      this.logger.warn(`Failed to send message: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
   }
 
   /**
    * Updates read receipts and read cursors for a room member.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.MESSAGE_READ)
-  handleMarkRead(
+  async handleMarkRead(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: MarkReadWsDto,
-  ): { ok: true } {
+  ): Promise<{ ok: boolean }> {
     const userId = (client?.data as any)?.user?.id;
+    if (userId) {
+      await this.prisma.roomMember
+        .update({
+          where: { roomId_userId: { roomId: payload.roomId, userId } },
+          data: { lastReadMessageId: payload.messageId },
+        })
+        .catch(() => {});
+
+      await this.prisma.messageReceipt
+        .upsert({
+          where: {
+            messageId_userId: {
+              messageId: payload.messageId,
+              userId,
+            },
+          },
+          update: {
+            status: ReceiptStatus.READ,
+            readAt: new Date(),
+          },
+          create: {
+            messageId: payload.messageId,
+            userId,
+            status: ReceiptStatus.READ,
+            readAt: new Date(),
+          },
+        })
+        .catch(() => {});
+    }
+
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.MESSAGE_READ, {
       roomId: payload.roomId,
       userId,
       messageId: payload.messageId,
     });
-    this.logger.log(`User ${userId} marked message ${payload.messageId} read in ${payload.roomId}`);
+    this.logger.log(
+      `User ${userId} marked message ${payload.messageId} read in ${payload.roomId}`,
+    );
     return { ok: true };
   }
 
@@ -231,11 +269,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Emits user typing indicator start (ephemeral, not written to DB).
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_START)
-  handleTypingStart(
+  async handleTypingStart(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingWsDto,
-  ): { ok: true } {
+  ): Promise<{ ok: true }> {
     const userId = (client?.data as any)?.user?.id;
+    if (userId) {
+      await this.typingService.setTyping(payload.roomId, userId);
+    }
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.TYPING, {
       roomId: payload.roomId,
       userId,
@@ -248,11 +289,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Emits user typing indicator stop (ephemeral, not written to DB).
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_STOP)
-  handleTypingStop(
+  async handleTypingStop(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingWsDto,
-  ): { ok: true } {
+  ): Promise<{ ok: true }> {
     const userId = (client?.data as any)?.user?.id;
+    if (userId) {
+      await this.typingService.removeTyping(payload.roomId, userId);
+    }
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.TYPING, {
       roomId: payload.roomId,
       userId,
@@ -265,16 +309,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Bulk reconnect resync for multiple rooms.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.ROOMS_RESYNC)
-  handleResync(
-    @ConnectedSocket() _client: Socket,
+  async handleResync(
+    @ConnectedSocket() client: Socket,
     @MessageBody() payload: ResyncWsDto,
-  ): { ok: true; rooms: any[] } {
+  ): Promise<{ ok: boolean; rooms: any[] }> {
+    const user = (client?.data as any)?.user;
+    if (!user?.id) {
+      return { ok: false, rooms: [] };
+    }
+
+    const rooms = await Promise.all(
+      payload.rooms.map(async (r) => {
+        try {
+          if (r.lastSeenMessageId) {
+            const messages = await this.messagesService.syncMessages(
+              user.id,
+              r.roomId,
+              { afterId: r.lastSeenMessageId },
+            );
+            return { roomId: r.roomId, messages };
+          }
+          const page = await this.messagesService.listMessages(
+            user.id,
+            r.roomId,
+            { limit: 30 },
+          );
+          return { roomId: r.roomId, messages: page.items };
+        } catch {
+          return { roomId: r.roomId, messages: [] };
+        }
+      }),
+    );
+
     return {
       ok: true,
-      rooms: payload.rooms.map((r) => ({
-        roomId: r.roomId,
-        messages: [],
-      })),
+      rooms,
     };
   }
 }

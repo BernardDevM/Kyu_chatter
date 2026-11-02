@@ -1,5 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { ReceiptStatus } from '../generated/prisma/enums.js';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { getNodeId } from '../common/utils/node-id.js';
 import type {
   MessagePageResponse,
@@ -16,42 +21,60 @@ import type { RemoveReactionQueryDto } from './dto/remove-reaction-query.dto.js'
 
 @Injectable()
 export class MessagesService {
+  constructor(private readonly prisma: PrismaService) {}
+
   /**
    * Resynchronizes missed messages in chronological order (oldest first) after client reconnection.
    */
   async syncMessages(
     userId: string,
     roomId: string,
-    _query: SyncMessagesQueryDto,
+    query: SyncMessagesQueryDto,
   ): Promise<MessageResponse[]> {
-    // TODO(impl): Verify caller membership in room.
-    // Locate anchor message: prisma.message.findUniqueOrThrow({ where: { id: _query.afterId } })
-    // Retrieve newer messages: prisma.message.findMany({
-    //   where: { roomId, createdAt: { gt: anchor.createdAt } },
-    //   take: _query.limit ?? 100,
-    //   orderBy: { createdAt: 'asc' },
-    //   include: { sender: true, attachments: { include: { media: true } }, reactions: true }
-    // })
-    return [
-      {
-        id: '018f3a5a-8b9a-7c2d-9e1f-444444444444',
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    const anchor = await this.prisma.message.findUnique({
+      where: { id: query.afterId },
+      select: { id: true, roomId: true, createdAt: true },
+    });
+    if (!anchor || anchor.roomId !== roomId) {
+      throw new NotFoundException(
+        `Anchor message with ID ${query.afterId} not found in this room`,
+      );
+    }
+
+    const limit = query.limit ?? 100;
+    const messages = await this.prisma.message.findMany({
+      where: {
         roomId,
-        sender: {
-          id: userId,
-          name: 'Current User',
-          image: null,
-        },
-        clientMessageId: '018f3a5a-8b9a-7c2d-9e1f-555555555555',
-        body: 'Resynced message content',
-        replyTo: null,
-        attachments: [],
-        reactions: [],
-        nodeId: getNodeId(),
-        createdAt: new Date().toISOString(),
-        editedAt: null,
-        deletedAt: null,
+        createdAt: { gt: anchor.createdAt },
       },
-    ];
+      take: limit,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: {
+        sender: { select: { id: true, name: true, image: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            sender: { select: { name: true } },
+          },
+        },
+        attachments: {
+          include: {
+            media: true,
+          },
+        },
+        reactions: true,
+      },
+    });
+
+    return messages.map((m) => this.mapMessageToResponse(m, userId));
   }
 
   /**
@@ -60,38 +83,49 @@ export class MessagesService {
   async listMessages(
     userId: string,
     roomId: string,
-    _query: ListMessagesQueryDto,
+    query: ListMessagesQueryDto,
   ): Promise<MessagePageResponse> {
-    // TODO(impl): Verify membership in roomMember.
-    // Query prisma.message.findMany({
-    //   where: { roomId },
-    //   take: _query.limit ?? 30,
-    //   cursor: _query.cursor ? { id: _query.cursor } : undefined,
-    //   orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    //   include: { sender: true, attachments: { include: { media: true } }, reactions: true, replyTo: { select: { id: true, body: true, sender: { select: { name: true } } } } }
-    // })
-    return {
-      items: [
-        {
-          id: '018f3a5a-8b9a-7c2d-9e1f-333333333333',
-          roomId,
-          sender: {
-            id: userId,
-            name: 'Current User',
-            image: null,
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    const limit = query.limit ?? 30;
+    const messages = await this.prisma.message.findMany({
+      where: { roomId },
+      take: limit + 1,
+      cursor: query.cursor ? { id: query.cursor } : undefined,
+      skip: query.cursor ? 1 : 0,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: {
+        sender: { select: { id: true, name: true, image: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            sender: { select: { name: true } },
           },
-          clientMessageId: '018f3a5a-8b9a-7c2d-9e1f-222222222222',
-          body: 'Hello world!',
-          replyTo: null,
-          attachments: [],
-          reactions: [],
-          nodeId: getNodeId(),
-          createdAt: new Date().toISOString(),
-          editedAt: null,
-          deletedAt: null,
         },
-      ],
-      nextCursor: null,
+        attachments: {
+          include: {
+            media: true,
+          },
+        },
+        reactions: true,
+      },
+    });
+
+    const hasMore = messages.length > limit;
+    const pageMessages = hasMore ? messages.slice(0, limit) : messages;
+    const items = pageMessages.map((m) => this.mapMessageToResponse(m, userId));
+    const nextCursor = hasMore ? items[items.length - 1]?.id ?? null : null;
+
+    return {
+      items,
+      nextCursor,
+      hasMore,
     };
   }
 
@@ -103,37 +137,102 @@ export class MessagesService {
     roomId: string,
     dto: SendMessageDto,
   ): Promise<MessageResponse> {
-    // TODO(impl): Verify room membership.
-    // Handle idempotency via unique (roomId, senderId, clientMessageId).
-    // Execute inside transaction:
-    // 1. prisma.message.create({ data: { roomId, senderId: userId, clientMessageId: dto.clientMessageId, body: dto.body, replyToId: dto.replyToId, nodeId: getNodeId() } })
-    // 2. Attach media: prisma.attachment.createMany({ data: (dto.mediaIds ?? []).map(mediaId => ({ messageId, mediaId })) })
-    // 3. prisma.room.update({ where: { id: roomId }, data: { updatedAt: new Date() } })
-    // 4. Broadcast message:new over Redis pub/sub.
-    return {
-      id: '018f3a5a-8b9a-7c2d-9e1f-333333333333',
-      roomId,
-      sender: {
-        id: userId,
-        name: 'Current User',
-        image: null,
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    // Idempotent duplicate check
+    const existing = await this.prisma.message.findUnique({
+      where: {
+        roomId_senderId_clientMessageId: {
+          roomId,
+          senderId: userId,
+          clientMessageId: dto.clientMessageId,
+        },
       },
-      clientMessageId: dto.clientMessageId,
-      body: dto.body ?? null,
-      replyTo: dto.replyToId
-        ? {
-            id: dto.replyToId,
-            body: 'Replied message snippet',
-            senderName: 'Jane Doe',
-          }
-        : null,
-      attachments: [],
-      reactions: [],
-      nodeId: getNodeId(),
-      createdAt: new Date().toISOString(),
-      editedAt: null,
-      deletedAt: null,
-    };
+      include: {
+        sender: { select: { id: true, name: true, image: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            sender: { select: { name: true } },
+          },
+        },
+        attachments: {
+          include: {
+            media: true,
+          },
+        },
+        reactions: true,
+      },
+    });
+    if (existing) {
+      return this.mapMessageToResponse(existing, userId);
+    }
+
+    if (dto.replyToId) {
+      const parent = await this.prisma.message.findUnique({
+        where: { id: dto.replyToId },
+        select: { id: true, roomId: true },
+      });
+      if (!parent || parent.roomId !== roomId) {
+        throw new BadRequestException(
+          'Parent reply message does not exist in this room',
+        );
+      }
+    }
+
+    if (dto.mediaIds && dto.mediaIds.length > 0) {
+      const mediaCount = await this.prisma.media.count({
+        where: { id: { in: dto.mediaIds } },
+      });
+      if (mediaCount !== dto.mediaIds.length) {
+        throw new BadRequestException('One or more media attachments not found');
+      }
+    }
+
+    const message = await this.prisma.message.create({
+      data: {
+        roomId,
+        senderId: userId,
+        clientMessageId: dto.clientMessageId,
+        body: dto.body ?? null,
+        replyToId: dto.replyToId ?? null,
+        nodeId: getNodeId(),
+        attachments: dto.mediaIds?.length
+          ? {
+              create: dto.mediaIds.map((mediaId) => ({ mediaId })),
+            }
+          : undefined,
+      },
+      include: {
+        sender: { select: { id: true, name: true, image: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            sender: { select: { name: true } },
+          },
+        },
+        attachments: {
+          include: {
+            media: true,
+          },
+        },
+        reactions: true,
+      },
+    });
+
+    await this.prisma.room.update({
+      where: { id: roomId },
+      data: { updatedAt: new Date() },
+    });
+
+    return this.mapMessageToResponse(message, userId);
   }
 
   /**
@@ -144,70 +243,141 @@ export class MessagesService {
     messageId: string,
     dto: EditMessageDto,
   ): Promise<MessageResponse> {
-    // TODO(impl): Verify message.senderId === userId and message.deletedAt === null.
-    // Update prisma.message.update({ where: { id: messageId }, data: { body: dto.body, editedAt: new Date() } })
-    // Broadcast message:updated over Redis pub/sub.
-    return {
-      id: messageId,
-      roomId: '018f3a5a-8b9a-7c2d-9e1f-111111111111',
-      sender: {
-        id: userId,
-        name: 'Current User',
-        image: null,
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!message) {
+      throw new NotFoundException(`Message with ID ${messageId} not found`);
+    }
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('You can only edit your own messages');
+    }
+    if (message.deletedAt !== null) {
+      throw new BadRequestException('Cannot edit a deleted message');
+    }
+
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        body: dto.body,
+        editedAt: new Date(),
       },
-      clientMessageId: '018f3a5a-8b9a-7c2d-9e1f-222222222222',
-      body: dto.body,
-      replyTo: null,
-      attachments: [],
-      reactions: [],
-      nodeId: getNodeId(),
-      createdAt: new Date().toISOString(),
-      editedAt: new Date().toISOString(),
-      deletedAt: null,
-    };
+      include: {
+        sender: { select: { id: true, name: true, image: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            sender: { select: { name: true } },
+          },
+        },
+        attachments: {
+          include: {
+            media: true,
+          },
+        },
+        reactions: true,
+      },
+    });
+
+    return this.mapMessageToResponse(updated, userId);
   }
 
   /**
    * Soft-deletes a message sent by the caller.
    */
-  async deleteMessage(_userId: string, _messageId: string): Promise<void> {
-    // TODO(impl): Verify message.senderId === _userId.
-    // Soft delete: prisma.message.update({ where: { id: _messageId }, data: { deletedAt: new Date(), body: null } })
-    // Broadcast message:deleted over Redis pub/sub.
+  async deleteMessage(userId: string, messageId: string): Promise<void> {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!message) {
+      throw new NotFoundException(`Message with ID ${messageId} not found`);
+    }
+    if (message.senderId !== userId) {
+      throw new ForbiddenException('You can only delete your own messages');
+    }
+
+    await this.prisma.message.update({
+      where: { id: messageId },
+      data: {
+        deletedAt: new Date(),
+        body: null,
+      },
+    });
   }
 
   /**
    * Adds an emoji reaction to a message.
    */
   async addReaction(
-    _userId: string,
-    _messageId: string,
+    userId: string,
+    messageId: string,
     dto: AddReactionDto,
   ): Promise<ReactionSummaryResponse[]> {
-    // TODO(impl): Upsert prisma.messageReaction.upsert({ where: { messageId_userId_emoji: { messageId: _messageId, userId: _userId, emoji: dto.emoji } } })
-    // Group and count reactions for message: prisma.messageReaction.groupBy({ by: ['emoji'], where: { messageId: _messageId }, _count: true })
-    // Broadcast reaction:updated event.
-    return [
-      {
-        emoji: dto.emoji,
-        count: 1,
-        reactedByMe: true,
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, roomId: true },
+    });
+    if (!message) {
+      throw new NotFoundException(`Message with ID ${messageId} not found`);
+    }
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId: message.roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    await this.prisma.messageReaction.upsert({
+      where: {
+        messageId_userId_emoji: {
+          messageId,
+          userId,
+          emoji: dto.emoji,
+        },
       },
-    ];
+      update: {},
+      create: {
+        messageId,
+        userId,
+        emoji: dto.emoji,
+      },
+    });
+
+    return this.aggregateReactions(messageId, userId);
   }
 
   /**
    * Removes a previously added emoji reaction.
    */
   async removeReaction(
-    _userId: string,
-    _messageId: string,
-    _query: RemoveReactionQueryDto,
+    userId: string,
+    messageId: string,
+    query: RemoveReactionQueryDto,
   ): Promise<ReactionSummaryResponse[]> {
-    // TODO(impl): Delete prisma.messageReaction.deleteMany({ where: { messageId: _messageId, userId: _userId, emoji: _query.emoji } })
-    // Re-count reactions: prisma.messageReaction.groupBy({ by: ['emoji'], where: { messageId: _messageId }, _count: true })
-    // Broadcast reaction:updated event.
-    return [];
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, roomId: true },
+    });
+    if (!message) {
+      throw new NotFoundException(`Message with ID ${messageId} not found`);
+    }
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId: message.roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    await this.prisma.messageReaction.deleteMany({
+      where: {
+        messageId,
+        userId,
+        emoji: query.emoji,
+      },
+    });
+
+    return this.aggregateReactions(messageId, userId);
   }
 
   /**
@@ -215,17 +385,146 @@ export class MessagesService {
    */
   async getReceipts(
     userId: string,
-    _messageId: string,
+    messageId: string,
   ): Promise<ReceiptResponse[]> {
-    // TODO(impl): Verify caller belongs to the message's room.
-    // Query prisma.messageReceipt.findMany({ where: { messageId: _messageId } })
-    return [
-      {
-        userId,
-        status: ReceiptStatus.READ,
-        deliveredAt: new Date().toISOString(),
-        readAt: new Date().toISOString(),
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, roomId: true },
+    });
+    if (!message) {
+      throw new NotFoundException(`Message with ID ${messageId} not found`);
+    }
+    const member = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId: message.roomId, userId } },
+    });
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this room');
+    }
+
+    const receipts = await this.prisma.messageReceipt.findMany({
+      where: { messageId },
+      select: {
+        userId: true,
+        status: true,
+        deliveredAt: true,
+        readAt: true,
       },
-    ];
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return receipts.map((r) => ({
+      userId: r.userId,
+      status: r.status,
+      deliveredAt: r.deliveredAt ? r.deliveredAt.toISOString() : null,
+      readAt: r.readAt ? r.readAt.toISOString() : null,
+    }));
+  }
+
+  // ==========================================
+  // HELPER METHODS
+  // ==========================================
+
+  private async aggregateReactions(
+    messageId: string,
+    currentUserId: string,
+  ): Promise<ReactionSummaryResponse[]> {
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, userId: true },
+    });
+
+    const summaryMap = new Map<
+      string,
+      { count: number; reactedByMe: boolean }
+    >();
+    for (const r of reactions) {
+      const existing = summaryMap.get(r.emoji) ?? {
+        count: 0,
+        reactedByMe: false,
+      };
+      existing.count += 1;
+      if (r.userId === currentUserId) {
+        existing.reactedByMe = true;
+      }
+      summaryMap.set(r.emoji, existing);
+    }
+
+    return Array.from(summaryMap.entries()).map(([emoji, val]) => ({
+      emoji,
+      count: val.count,
+      reactedByMe: val.reactedByMe,
+    }));
+  }
+
+  private mapMessageToResponse(
+    msg: any,
+    currentUserId: string,
+  ): MessageResponse {
+    const reactionMap = new Map<
+      string,
+      { count: number; reactedByMe: boolean; userIds: string[] }
+    >();
+    for (const r of msg.reactions ?? []) {
+      const existing = reactionMap.get(r.emoji) ?? {
+        count: 0,
+        reactedByMe: false,
+        userIds: [],
+      };
+      existing.count += 1;
+      existing.userIds.push(r.userId);
+      if (r.userId === currentUserId) {
+        existing.reactedByMe = true;
+      }
+      reactionMap.set(r.emoji, existing);
+    }
+    const reactions = Array.from(reactionMap.entries()).map(([emoji, val]) => ({
+      emoji,
+      count: val.count,
+      reactedByMe: val.reactedByMe,
+      hasReacted: val.reactedByMe,
+      userIds: val.userIds,
+    }));
+
+    return {
+      id: msg.id,
+      roomId: msg.roomId,
+      senderId: msg.senderId ?? msg.sender?.id,
+      sender: {
+        id: msg.sender.id,
+        name: msg.sender.name,
+        image: msg.sender.image,
+      },
+      clientMessageId: msg.clientMessageId,
+      body: msg.body,
+      replyToId: msg.replyToId ?? (msg.replyTo ? msg.replyTo.id : null),
+      replyTo: msg.replyTo
+        ? {
+            id: msg.replyTo.id,
+            body: msg.replyTo.body,
+            senderName: msg.replyTo.sender?.name ?? 'Unknown',
+          }
+        : null,
+      attachments: (msg.attachments ?? []).map((att: any) => ({
+        id: att.id,
+        media: {
+          id: att.media.id,
+          kind: att.media.kind,
+          status: att.media.status,
+          url: att.media.url,
+          originalName: att.media.originalName,
+          mimeType: att.media.mimeType,
+          bytes: Number(att.media.bytes),
+          width: att.media.width,
+          height: att.media.height,
+          duration: att.media.duration,
+          createdAt: att.media.createdAt.toISOString(),
+        },
+      })),
+      reactions,
+      nodeId: msg.nodeId,
+      createdAt: msg.createdAt.toISOString(),
+      editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null,
+    };
   }
 }

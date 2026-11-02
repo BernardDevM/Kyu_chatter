@@ -6,6 +6,7 @@ import { AppModule } from './app.module.js';
 import { createPingHandler } from './health/ping.handler.js';
 import { PrismaService } from './prisma/prisma.service.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
+import { corsOriginCallback } from './common/utils/cors.util.js';
 
 dns.setDefaultResultOrder('ipv4first');
 
@@ -14,15 +15,18 @@ async function bootstrap() {
 
   // Before enableCors(): CORS would answer OPTIONS /ping without hitting the DB.
   app.use('/ping', createPingHandler(app.get(PrismaService)));
-
-  const frontendOrigins = (process.env.FRONTEND_URLS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   app.enableCors({
-    origin: frontendOrigins,
+    origin: corsOriginCallback,
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-dev-user-id',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+    ],
     exposedHeaders: ['X-Node-Id'],
   });
 

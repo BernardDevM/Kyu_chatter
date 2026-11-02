@@ -6,6 +6,8 @@ export interface ReactionSummaryResponse {
   emoji: string;
   count: number;
   reactedByMe: boolean;
+  hasReacted?: boolean;
+  userIds?: string[];
 }
 
 export interface ReceiptResponse {
@@ -24,9 +26,11 @@ export interface ReplyToSummaryResponse {
 export interface MessageResponse {
   id: string;
   roomId: string;
+  senderId: string;
   sender: UserSummaryResponse;
   clientMessageId: string;
   body: string | null;
+  replyToId: string | null;
   replyTo: ReplyToSummaryResponse | null;
   attachments: AttachmentResponse[];
   reactions: ReactionSummaryResponse[];
@@ -39,4 +43,5 @@ export interface MessageResponse {
 export interface MessagePageResponse {
   items: MessageResponse[];
   nextCursor: string | null;
+  hasMore: boolean;
 }
