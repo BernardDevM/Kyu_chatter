@@ -66,8 +66,17 @@ export class AuthGuard implements CanActivate {
   ): Promise<boolean> {
     try {
       if (request?.headers) {
+        const headers = fromNodeHeaders(request.headers);
+        const authHeader = request.headers.authorization;
+
+        // Map Bearer token (from Swagger UI or API clients) to session cookie if needed
+        if (authHeader && authHeader.startsWith('Bearer ') && !headers.get('cookie')) {
+          const token = authHeader.slice(7).trim();
+          headers.set('cookie', `better-auth.session_token=${token}`);
+        }
+
         const session = await auth.api.getSession({
-          headers: fromNodeHeaders(request.headers),
+          headers,
         });
 
         if (session?.user) {
@@ -80,13 +89,21 @@ export class AuthGuard implements CanActivate {
       // Ignore session fetch errors and proceed to fallback
     }
 
-    // Development-only fallback header
+    // Development-only fallback header or dev Bearer token (e.g. Bearer dev-user-123)
     if (
       process.env.NODE_ENV !== 'production' &&
       process.env.ALLOW_DEV_USER_HEADER === 'true'
     ) {
       const devHeader = request?.headers?.['x-dev-user-id'];
-      const devUserId = Array.isArray(devHeader) ? devHeader[0] : devHeader;
+      let devUserId = Array.isArray(devHeader) ? devHeader[0] : devHeader;
+
+      if (!devUserId && request?.headers?.authorization?.startsWith('Bearer ')) {
+        const bearer = request.headers.authorization.slice(7).trim();
+        if (bearer.length > 0) {
+          devUserId = bearer;
+        }
+      }
+
       if (typeof devUserId === 'string' && devUserId.trim().length > 0) {
         const devUser = {
           id: devUserId.trim(),
