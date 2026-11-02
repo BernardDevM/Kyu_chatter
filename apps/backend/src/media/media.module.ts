@@ -5,6 +5,7 @@ import { CloudinaryService } from './cloudinary.service.js';
 
 @Module({
   controllers: [MediaController],
-  providers: [MediaService, CloudinaryService]
+  providers: [MediaService, CloudinaryService],
+  exports: [MediaService],
 })
 export class MediaModule {}

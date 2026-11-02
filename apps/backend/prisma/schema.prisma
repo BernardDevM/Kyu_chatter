@@ -326,7 +326,7 @@ model Media {
 
   originalName String
   mimeType     String
-  bytes        BigInt
+  bytes        Int
 
   kind   AttachmentKind
   status MediaStatus    @default(UPLOADING)
