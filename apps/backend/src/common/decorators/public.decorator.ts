@@ -1,3 +1,6 @@
-import { Reflector } from '@nestjs/core';
+import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 
-export const Public = Reflector.createDecorator<string[]>();
+/**
+ * Re-export AllowAnonymous as Public to mark routes that skip authentication.
+ */
+export const Public = AllowAnonymous;
