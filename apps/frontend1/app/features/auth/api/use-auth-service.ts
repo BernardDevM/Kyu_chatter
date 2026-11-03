@@ -1,14 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
 
 import { usersApi } from "@/features/users/api/users-api";
+import type { Me } from "@/features/users/types/user";
 import { handleError } from "@/lib/handle-error";
 import { queryKeys } from "@/lib/query-keys";
 
 import { useUserSessionStore } from "../stores/user-session-store";
-import { authApi } from "./auth-api";
+import { authApi, type SignInInput, type SignUpInput } from "./auth-api";
+
+const SESSION_NOT_KEPT =
+  "You signed in, but the browser did not keep the session. Check CORS and cookie settings on the API.";
 
 export function useAuthService() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const devUserId = useUserSessionStore((s) => s.devUserId);
   const setDevUserId = useUserSessionStore((s) => s.setDevUserId);
 
@@ -21,17 +28,40 @@ export function useAuthService() {
     staleTime: 5 * 60_000,
   });
 
-  const refreshSession = () => queryClient.resetQueries();
+  // A real login replaces any leftover dev identity (it would keep the session
+  // query on the dev header), and a dropped cookie is reported instead of ignored.
+  const requireSession = async (): Promise<Me> => {
+    const user = await authApi.getSession.call();
+    if (!user) throw new Error(SESSION_NOT_KEPT);
+    return user;
+  };
+
+  const enterApp = (user: Me, message: string) => {
+    setDevUserId(null);
+    queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "session" });
+    queryClient.setQueryData(queryKeys.session(null), user);
+    toast.success(message);
+    navigate("/chat", { replace: true });
+  };
+
+  const firstName = (user: Me) => user.name.trim().split(/\s+/)[0] || user.name;
 
   const signIn = useMutation({
-    mutationFn: authApi.signIn.call,
-    onSuccess: refreshSession,
+    mutationFn: async (input: SignInInput) => {
+      await authApi.signIn.call(input);
+      return requireSession();
+    },
+    onSuccess: (user) => enterApp(user, `Welcome back, ${firstName(user)}`),
     onError: (e) => handleError(e),
   });
 
   const signUp = useMutation({
-    mutationFn: authApi.signUp.call,
-    onSuccess: refreshSession,
+    mutationFn: async (input: SignUpInput) => {
+      await authApi.signUp.call(input);
+      return requireSession();
+    },
+    onSuccess: (user) =>
+      enterApp(user, `Account created. Welcome, ${firstName(user)}`),
     onError: (e) => handleError(e),
   });
 

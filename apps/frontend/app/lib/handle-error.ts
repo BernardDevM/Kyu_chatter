@@ -2,6 +2,15 @@ import { toast } from "sonner";
 
 const DEFAULT_MESSAGE = "An unexpected error occurred";
 
+// Better Auth sends { code, message }. Map the codes people actually hit.
+const AUTH_MESSAGES: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: "Email or password is incorrect.",
+  USER_ALREADY_EXISTS:
+    "An account with this email already exists. Sign in instead.",
+  PASSWORD_TOO_SHORT: "Use at least 8 characters for your password.",
+  INVALID_EMAIL: "Enter a valid email address.",
+};
+
 // A usable message: a non-empty string, or a list of them (NestJS
 // validation errors send `message: string[]`).
 function asMessage(value: unknown): string | undefined {
@@ -38,10 +47,13 @@ export function getErrorMessage(error: any): string {
 
 // Shows a toast with the most useful message we can dig out of an API error.
 export const handleError = (error: any, action?: string) => {
-  const message = getErrorMessage(error);
-  const finalMessage = action
-    ? `Error occurred while trying to ${action}: ${message}`
-    : message;
+  const code = error?.response?.data?.code;
+  // axios sets no response when the API is down, blocked by CORS, or timed out.
+  const unreachable = error?.isAxiosError && !error.response;
 
-  toast.error(finalMessage);
+  const message = unreachable
+    ? "Can't reach the server. Check your connection and the API URL."
+    : (AUTH_MESSAGES[code] ?? getErrorMessage(error));
+
+  toast.error(action ? `Could not ${action}: ${message}` : message);
 };
