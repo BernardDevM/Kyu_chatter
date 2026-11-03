@@ -1,4 +1,4 @@
-/** Three nodes, one mesh: the Kyu mark. Inherits colour from the parent. */
+/** Three nodes, one mesh: the logo mark. Inherits colour from the parent. */
 export function KyuMark({ className }: { className?: string }) {
   return (
     <svg

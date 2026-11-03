@@ -1,4 +1,4 @@
-# Kyu Chatter — web app (Paper)
+# SWE Distributed Systems — web app (Paper)
 
 React Router (SPA) + Tailwind 4 + shadcn/ui frontend for `apps/backend`.
 Contract: [`docs/API.md`](../../docs/API.md).

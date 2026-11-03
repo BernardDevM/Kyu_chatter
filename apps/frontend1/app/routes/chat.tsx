@@ -5,7 +5,7 @@ import { RouteGuard } from "@/features/auth/components/route-guard";
 import { DrawerProvider } from "@/providers/drawer-provider";
 import { RealtimeProvider } from "@/providers/realtime-provider";
 
-export const meta = () => [{ title: "Chats · Kyu Chatter" }];
+export const meta = () => [{ title: "Chats · SWE Distributed Systems" }];
 
 export default function ChatLayout() {
   return (

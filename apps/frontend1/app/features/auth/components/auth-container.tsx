@@ -31,12 +31,14 @@ export function AuthContainer({
             aria-hidden="true"
             className="font-display text-signal pointer-events-none absolute -bottom-[0.16em] -left-[0.03em] text-[min(15rem,26vw)] leading-none font-extrabold tracking-tighter select-none"
           >
-            kyu
+            swe
           </span>
           <div className="relative flex h-full flex-col gap-10 p-10">
             <div className="flex items-center gap-2.5">
               <KyuMark className="text-signal size-7" />
-              <span className="font-display text-xl font-bold">kyu chatter</span>
+              <span className="font-display text-xl font-bold">
+                SWE Distributed Systems
+              </span>
             </div>
 
             <div className="flex max-w-sm flex-col gap-2">
@@ -73,7 +75,9 @@ export function AuthContainer({
           <div className="w-full max-w-sm">
             <div className="text-primary mb-10 flex items-center gap-2 lg:hidden">
               <KyuMark className="size-6" />
-              <span className="font-display text-lg font-bold">kyu chatter</span>
+              <span className="font-display text-lg font-bold">
+                SWE Distributed Systems
+              </span>
             </div>
             <div className="mb-8 space-y-2">
               <h1 className="text-3xl leading-tight font-extrabold">{title}</h1>

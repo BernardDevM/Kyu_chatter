@@ -31,7 +31,7 @@ export function getErrorMessage(error: any): string {
     // Wrapped API response: { response: { message } } or { response: "..." }
     asMessage(error?.response?.data?.response?.message) ??
     asMessage(error?.response?.data?.response) ??
-    // Kyu envelope: { success: false, error: { message, details } }
+    // API envelope: { success: false, error: { message, details } }
     asMessage(error?.response?.data?.error?.details) ??
     asMessage(error?.response?.data?.error?.message) ??
     // NestJS: { message: "..." | ["..."], error: "Bad Request" }

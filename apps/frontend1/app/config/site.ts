@@ -1,4 +1,4 @@
 export const siteConfig = {
-  name: "Kyu Chatter",
-  description: "Real-time chat that keeps working when a server node dies.",
+  name: "SWE Distributed Systems",
+  description: "A real-time chat across several server nodes that keeps working when one dies.",
 } as const;
