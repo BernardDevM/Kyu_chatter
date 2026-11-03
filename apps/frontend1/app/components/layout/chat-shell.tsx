@@ -13,50 +13,53 @@ import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
 /**
- * Floating-card layout: a slim icon rail, a rounded chat list card and a
- * rounded conversation card on a warm backdrop. On phones one card shows at
- * a time: the list at /chat, the conversation at /chat/:roomId.
+ * One continuous card on a warm backdrop: a slim icon rail, the chat list and
+ * the conversation share a single rounded surface, split by hairline dividers.
+ * On phones one pane shows at a time: the list at /chat, the conversation at
+ * /chat/:roomId.
  */
 export function ChatShell({ children }: { children: ReactNode }) {
   const { roomId } = useParams();
   const onOpen = useNewChatStore((s) => s.onOpen);
 
   return (
-    <div className="flex h-dvh w-full gap-3 p-0 md:p-3">
-      <nav className="bg-rail text-rail-foreground hidden w-16 shrink-0 flex-col items-center gap-4 rounded-[2rem] py-5 md:flex">
-        <KyuMark className="text-signal size-8" />
-        <Button
-          size="icon"
-          className="bg-signal text-signal-foreground hover:bg-signal/90 size-11"
-          aria-label="New chat"
-          onClick={() => onOpen()}
+    <div className="h-dvh w-full p-0 md:p-3">
+      <div className="bg-card flex h-full w-full overflow-hidden border shadow-sm md:rounded-[2rem]">
+        <nav className="bg-rail text-rail-foreground hidden w-16 shrink-0 flex-col items-center gap-4 py-5 md:flex">
+          <KyuMark className="text-signal size-8" />
+          <Button
+            size="icon"
+            className="bg-signal text-signal-foreground hover:bg-signal/90 size-11"
+            aria-label="New chat"
+            onClick={() => onOpen()}
+          >
+            <SquarePen />
+          </Button>
+          <div className="mt-auto flex flex-col items-center gap-2 [&_[data-slot=button]]:text-inherit [&_[data-slot=button]:hover]:bg-white/10 [&_[data-slot=button]:hover]:text-inherit">
+            <ConnectionBadge compact />
+            <ThemeToggle />
+            <UserMenu />
+          </div>
+        </nav>
+
+        <aside
+          className={cn(
+            "w-full shrink-0 overflow-hidden md:block md:w-88 md:border-r",
+            roomId ? "hidden" : "block",
+          )}
         >
-          <SquarePen />
-        </Button>
-        <div className="mt-auto flex flex-col items-center gap-2 [&_[data-slot=button]]:text-inherit [&_[data-slot=button]:hover]:bg-white/10 [&_[data-slot=button]:hover]:text-inherit">
-          <ConnectionBadge compact />
-          <ThemeToggle />
-          <UserMenu />
-        </div>
-      </nav>
+          <Sidebar />
+        </aside>
 
-      <aside
-        className={cn(
-          "bg-card w-full shrink-0 overflow-hidden border shadow-sm md:block md:w-88 md:rounded-[2rem]",
-          roomId ? "hidden" : "block",
-        )}
-      >
-        <Sidebar />
-      </aside>
-
-      <main
-        className={cn(
-          "bg-card min-w-0 flex-1 overflow-hidden border shadow-sm md:flex md:rounded-[2rem]",
-          roomId ? "flex" : "hidden",
-        )}
-      >
-        {children}
-      </main>
+        <main
+          className={cn(
+            "min-w-0 flex-1 overflow-hidden md:flex",
+            roomId ? "flex" : "hidden",
+          )}
+        >
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
