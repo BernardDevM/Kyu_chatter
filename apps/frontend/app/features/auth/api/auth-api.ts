@@ -35,6 +35,22 @@ export const authApi = {
     call: (input: SignUpInput) =>
       apiClient.post("/api/auth/sign-up/email", input),
   },
+  signInWithGoogle: {
+    call: async (): Promise<string> => {
+      const origin = window.location.origin;
+      const { data } = await apiClient.post<{ url?: string }>(
+        "/api/auth/sign-in/social",
+        {
+          provider: "google",
+          callbackURL: `${origin}/chat`,
+          newUserCallbackURL: `${origin}/chat`,
+          errorCallbackURL: `${origin}/auth/login`,
+        },
+      );
+      if (!data?.url) throw new Error("Google sign-in is unavailable");
+      return data.url;
+    },
+  },
   signOut: {
     call: () => apiClient.post("/api/auth/sign-out", {}),
   },

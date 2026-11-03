@@ -35,6 +35,12 @@ export function useAuthService() {
     onError: (e) => handleError(e),
   });
 
+  const signInWithGoogle = useMutation({
+    mutationFn: authApi.signInWithGoogle.call,
+    onSuccess: (url) => window.location.assign(url),
+    onError: (e) => handleError(e),
+  });
+
   const devSignIn = (id: string) => {
     setDevUserId(id.trim());
     return queryClient.resetQueries();
@@ -52,5 +58,5 @@ export function useAuthService() {
     onError: (e) => handleError(e),
   });
 
-  return { session, signIn, signUp, devSignIn, signOut };
+  return { session, signIn, signUp, signInWithGoogle, devSignIn, signOut };
 }
