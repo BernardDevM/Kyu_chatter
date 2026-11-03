@@ -1,7 +1,7 @@
 import { SquarePen } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { KyuMark } from "@/components/brand/kyu-mark";
+import { Button } from "@/components/ui/button";
 import { ConnectionBadge } from "@/features/realtime/components/connection-badge";
 import { RoomList } from "@/features/rooms/components/room-list";
 import { useNewChatStore } from "@/features/rooms/stores/new-chat-store";
