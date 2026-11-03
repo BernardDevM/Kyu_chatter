@@ -16,10 +16,24 @@ import type {
   UserSummaryResponse,
 } from './dto/user.response.js';
 
+import { UseGuards } from '@nestjs/common';
+
+import {
+  AuthGuard,
+  OptionalAuth,
+} from '@thallesp/nestjs-better-auth';
+
+
+
 @ApiTags('Users')
 @ApiBearerAuth('session-auth')
-@ApiSecurity('dev-user-id')
 @Controller('api/users')
+@UseGuards(AuthGuard)
+@OptionalAuth()
+
+
+
+
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
