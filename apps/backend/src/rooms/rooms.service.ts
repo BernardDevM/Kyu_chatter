@@ -96,19 +96,19 @@ export class RoomsService {
     userId: string,
     dto: CreateDirectRoomDto,
   ): Promise<RoomDetailResponse> {
-    if (userId === dto.userId) {
+    if (userId === dto.targetUserId) {
       throw new BadRequestException('Cannot create a direct room with yourself');
     }
 
     const otherUser = await this.prisma.user.findUnique({
-      where: { id: dto.userId },
+      where: { id: dto.targetUserId },
       select: { id: true, name: true, image: true },
     });
     if (!otherUser) {
-      throw new NotFoundException(`User with ID ${dto.userId} not found`);
+      throw new NotFoundException(`User with ID ${dto.targetUserId} not found`);
     }
 
-    const directKey = [userId, dto.userId].sort().join(':');
+    const directKey = [userId, dto.targetUserId].sort().join(':');
 
     let room = await this.prisma.room.findUnique({
       where: { directKey },
@@ -142,7 +142,7 @@ export class RoomsService {
           members: {
             create: [
               { userId, role: MemberRole.MEMBER },
-              { userId: dto.userId, role: MemberRole.MEMBER },
+              { userId: dto.targetUserId, role: MemberRole.MEMBER },
             ],
           },
         },

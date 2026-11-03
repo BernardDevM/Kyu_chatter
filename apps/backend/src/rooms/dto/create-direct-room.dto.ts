@@ -11,5 +11,5 @@ export class CreateDirectRoomDto {
   @IsNotEmpty()
   @Length(1, 64)
   @Transform(trimString)
-  userId!: string;
+  targetUserId!: string;
 }
