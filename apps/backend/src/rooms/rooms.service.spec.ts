@@ -15,7 +15,10 @@ describe('RoomsService', () => {
   const now = new Date('2026-01-01T00:00:00.000Z');
 
   /** A `roomMember.findUnique` result (with room) as consumed by `getRoom`. */
-  const membershipWithRoom = (room: Record<string, unknown>, role = MemberRole.OWNER) => ({
+  const membershipWithRoom = (
+    room: Record<string, unknown>,
+    role: MemberRole = MemberRole.OWNER,
+  ) => ({
     roomId: room.id,
     userId: 'user_1',
     role,
@@ -83,7 +86,7 @@ describe('RoomsService', () => {
 
   describe('createGroupRoom', () => {
     it('creates a group room, assigns creator as OWNER and returns detail with members', async () => {
-      prismaMock.user.count.mockResolvedValue(2);
+      prismaMock.user.findMany.mockResolvedValue([{ id: 'user_2' }, { id: 'user_3' }]);
       prismaMock.room.create.mockResolvedValue({ id: 'room_1' });
       prismaMock.roomMember.findUnique.mockResolvedValue(
         membershipWithRoom({
@@ -135,12 +138,12 @@ describe('RoomsService', () => {
       expect(res.preference).toEqual({ isMuted: false, isArchived: false, isPinned: false });
     });
 
-    it('throws BadRequestException when an invited user does not exist', async () => {
-      prismaMock.user.count.mockResolvedValue(1);
+    it('throws NotFoundException when an invited user does not exist', async () => {
+      prismaMock.user.findMany.mockResolvedValue([{ id: 'user_2' }]);
 
       await expect(
         service.createGroupRoom('user_1', { name: 'G', memberUserIds: ['user_2', 'ghost'] }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(NotFoundException);
       expect(prismaMock.room.create).not.toHaveBeenCalled();
     });
   });
@@ -411,11 +414,21 @@ describe('RoomsService', () => {
     });
 
     it('addMembers adds new users into group room', async () => {
-      prismaMock.roomMember.findUnique.mockResolvedValue({
-        userId: 'user_1',
-        role: MemberRole.OWNER,
-        room: { type: RoomType.GROUP },
-      });
+      // 1st lookup: the caller's membership; 2nd: the membership row just created.
+      prismaMock.roomMember.findUnique
+        .mockResolvedValueOnce({
+          userId: 'user_1',
+          role: MemberRole.OWNER,
+          room: { type: RoomType.GROUP },
+        })
+        .mockResolvedValueOnce({
+          roomId: 'room_1',
+          userId: 'user_2',
+          role: MemberRole.MEMBER,
+          joinedAt: now,
+          user: { id: 'user_2', name: 'Bob', image: null },
+        });
+      prismaMock.roomMember.createMany.mockResolvedValue({ count: 1 });
       prismaMock.roomMember.findMany.mockResolvedValue([
         { userId: 'user_1' },
       ]);

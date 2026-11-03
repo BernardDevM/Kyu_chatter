@@ -10,6 +10,7 @@ describe('TransformResponseInterceptor', () => {
   function createMockContext(
     path: string,
     statusCode = 200,
+    type: 'http' | 'ws' | 'rpc' = 'http',
   ): {
     context: ExecutionContext;
     headers: Record<string, string>;
@@ -24,6 +25,7 @@ describe('TransformResponseInterceptor', () => {
     } as unknown as Response;
 
     const context = {
+      getType: () => type,
       switchToHttp: () => ({
         getRequest: () => mockRequest,
         getResponse: () => mockResponse,
@@ -94,5 +96,16 @@ describe('TransformResponseInterceptor', () => {
     const result = await firstValueFrom(interceptor.intercept(context, handler));
     expect(result).toBeUndefined();
     expect(headers['X-Node-Id']).toBeDefined();
+  });
+
+  it('does not wrap WebSocket acks (they already use their own { ok, data } shape)', async () => {
+    const { context, headers } = createMockContext('', 200, 'ws');
+    const ack = { ok: true, roomId: 'room_1', data: { id: 'msg_1' } };
+    const handler: CallHandler = { handle: () => of(ack) };
+
+    const result = await firstValueFrom(interceptor.intercept(context, handler));
+
+    expect(result).toBe(ack);
+    expect(headers['X-Node-Id']).toBeUndefined();
   });
 });
