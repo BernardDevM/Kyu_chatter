@@ -15,6 +15,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
 
@@ -59,7 +60,6 @@ import {
 
 export class RoomsController {
   
-  constructor(private readonly roomsService: RoomsService) {}
   constructor(
     private readonly roomsService: RoomsService,
     @Optional() private readonly realtime?: RealtimeEmitter,

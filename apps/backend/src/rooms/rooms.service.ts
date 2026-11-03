@@ -93,12 +93,6 @@ export class RoomsService {
       );
     }
 
-    const existingUsers = await this.prisma.user.count({
-      where: { id: { in: uniqueMemberIds } },
-    });
-    if (existingUsers !== uniqueMemberIds.length) {
-      throw new BadRequestException('One or more invited users do not exist');
-    }
 
     const room = await this.prisma.room.create({
       data: {
@@ -129,136 +123,78 @@ export class RoomsService {
   /**
    * Gets or creates a direct 1-on-1 chat room between two users using a sorted directKey.
    */
-  async createDirectRoom(
-    userId: string,
-    dto: CreateDirectRoomDto,
-  ): Promise<RoomDetailResponse> {
-    if (userId === dto.userId) {
-      throw new BadRequestException(
-        'Cannot create a direct room with yourself',
-      );
-    if (userId === dto.targetUserId) {
-      throw new BadRequestException('Cannot create a direct room with yourself');
-    }
+async createDirectRoom(
+  userId: string,
+  dto: CreateDirectRoomDto,
+): Promise<RoomDetailResponse> {
+  const targetUserId = dto.targetUserId;
 
-    const otherUser = await this.prisma.user.findUnique({
-      where: { id: dto.targetUserId },
-      select: { id: true },
-    });
-    if (!otherUser) {
-      throw new NotFoundException(`User with ID ${dto.targetUserId} not found`);
-    }
-
-    const directKey = [userId, dto.targetUserId].sort().join(':');
-
-    let room = await this.prisma.room.findUnique({
-      where: { directKey },
-      select: { id: true },
-    });
-
-    if (!room) {
-      try {
-        room = await this.prisma.room.create({
-          data: {
-            type: RoomType.DIRECT,
-            directKey,
-            createdById: userId,
-            members: {
-              create: [
-                { userId, role: MemberRole.MEMBER },
-                { userId: dto.userId, role: MemberRole.MEMBER },
-              ],
-            },
-          },
-          include: {
-            members: {
-              include: {
-                user: {
-                  select: { id: true, name: true, image: true },
-                },
-              },
-            },
-            preferences: {
-              where: { userId },
-            },
-            messages: {
-              take: 1,
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-              include: {
-                sender: {
-                  select: { id: true, name: true, image: true },
-                },
-                attachments: { include: { media: true } },
-                reactions: true,
-              },
-            },
-          },
-        });
-      } catch (error: unknown) {
-        // Prisma P2002 means a unique constraint was violated.
-        const isUniqueConstraintError =
-          typeof error === 'object' &&
-          error !== null &&
-          'code' in error &&
-          error.code === 'P2002';
-
-        if (!isUniqueConstraintError) {
-          throw error;
-        }
-
-        // Another request may have created this direct room first.
-        room = await this.prisma.room.findUnique({
-          where: { directKey },
-          include: {
-            members: {
-              include: {
-                user: {
-                  select: { id: true, name: true, image: true },
-                },
-              },
-            },
-            preferences: {
-              where: { userId },
-            },
-            messages: {
-              take: 1,
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-              include: {
-                sender: {
-                  select: { id: true, name: true, image: true },
-                },
-                attachments: { include: { media: true } },
-                reactions: true,
-              },
-            },
-          },
-        });
-
-        // If the conflicting record was not our directKey,
-        // preserve and propagate the original database error.
-        if (!room) {
-          throw error;
-        }
-                { userId: dto.targetUserId, role: MemberRole.MEMBER },
-              ],
-            },
-          },
-          select: { id: true },
-        });
-      } catch (err: unknown) {
-        // A concurrent request created the same direct room first.
-        if ((err as { code?: string })?.code !== 'P2002') throw err;
-        room = await this.prisma.room.findUnique({
-          where: { directKey },
-          select: { id: true },
-        });
-        if (!room) throw err;
-      }
-    }
-
-    return this.getRoom(userId, room.id);
+  if (userId === targetUserId) {
+    throw new BadRequestException(
+      'Cannot create a direct room with yourself',
+    );
   }
 
+  const otherUser = await this.prisma.user.findUnique({
+    where: { id: targetUserId },
+    select: { id: true },
+  });
+
+  if (!otherUser) {
+    throw new NotFoundException(`User with ID ${targetUserId} not found`);
+  }
+
+  // Sorting ensures both users generate the same unique direct key.
+  const directKey = [userId, targetUserId].sort().join(':');
+
+  let room = await this.prisma.room.findUnique({
+    where: { directKey },
+    select: { id: true },
+  });
+
+  if (!room) {
+    try {
+      room = await this.prisma.room.create({
+        data: {
+          type: RoomType.DIRECT,
+          directKey,
+          createdById: userId,
+          members: {
+            create: [
+              { userId, role: MemberRole.MEMBER },
+              { userId: targetUserId, role: MemberRole.MEMBER },
+            ],
+          },
+        },
+        select: { id: true },
+      });
+    } catch (error: unknown) {
+      const isUniqueConstraintError =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2002';
+
+      if (!isUniqueConstraintError) {
+        throw error;
+      }
+
+      // Another request may have created this direct room concurrently.
+      room = await this.prisma.room.findUnique({
+        where: { directKey },
+        select: { id: true },
+      });
+
+      if (!room) {
+        throw error;
+      }
+    }
+  }
+
+  return this.getRoom(userId, room.id);
+}
+
+  
   /**
    * Lists rooms the user belongs to, ordered by pinned status and latest activity.
    */
@@ -434,104 +370,96 @@ export class RoomsService {
   /**
    * Adds new users as members to an existing group room.
    */
-  async addMembers(
-    userId: string,
-    roomId: string,
-    dto: AddMembersDto,
-  ): Promise<RoomMemberResponse[]> {
-    // 1. Verify caller membership and room type.
-    const callerMember = await this.prisma.roomMember.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-      include: {
-        room: true,
-      },
-    });
-
-    if (!callerMember) {
-      throw new ForbiddenException('You are not a member of this room');
-    }
-
-    if (callerMember.room.type !== RoomType.GROUP) {
-      throw new BadRequestException('Cannot add members to a direct room');
-    }
-
-    // 2. Verify caller permissions.
-    if (
-      callerMember.role !== MemberRole.OWNER &&
-      callerMember.role !== MemberRole.ADMIN
-    ) {
-      throw new ForbiddenException('Only room owner or admin can add members');
-    }
-
-    // 3. Remove duplicate IDs and existing members.
-    const existingMembers = await this.prisma.roomMember.findMany({
-      where: { roomId },
-      select: { userId: true },
-    });
-
-    const existingSet = new Set(existingMembers.map((member) => member.userId));
-
-    const newIds = Array.from(new Set(dto.userIds)).filter(
-      (id) => !existingSet.has(id),
-    );
-
-    if (newIds.length === 0) {
-      return [];
-    }
-
-    // 4. Validate that every requested user exists.
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: newIds } },
-      select: USER_SUMMARY_SELECT,
-    });
-
-    const foundIds = new Set(users.map((user) => user.id));
-
-    const invalidIds = newIds.filter((id) => !foundIds.has(id));
-
-    if (invalidIds.length > 0) {
-      throw new NotFoundException(
-        `The following users were not found: ${invalidIds.join(', ')}`,
-      );
-    }
-
-    if (users.length === 0) {
-      return [];
-    }
-
-    // 5. Create memberships.
-const now = new Date();
-
-await this.prisma.roomMember.createMany({
-  data: users.map((u) => ({
-    roomId,
-    userId: u.id,
-    role: MemberRole.MEMBER,
-    joinedAt: now,
-  })),
-  skipDuplicates: true,
-});
-
-// 6. Retrieve the newly added memberships.
-// 5. Create memberships and identify users added by this request.
-const addedMembers = [];
-
-for (const user of users) {
-  const result = await this.prisma.roomMember.createMany({
-    data: [
-      {
-        roomId,
-        userId: user.id,
-        role: MemberRole.MEMBER,
-      },
-    ],
-    skipDuplicates: true,
+async addMembers(
+  userId: string,
+  roomId: string,
+  dto: AddMembersDto,
+): Promise<RoomMemberResponse[]> {
+  // 1. Verify caller membership and room type.
+  const callerMember = await this.prisma.roomMember.findUnique({
+    where: {
+      roomId_userId: { roomId, userId },
+    },
+    include: {
+      room: true,
+    },
   });
 
-  // count === 1 means this request actually inserted the membership.
-  if (result.count === 1) {
+  if (!callerMember) {
+    throw new ForbiddenException('You are not a member of this room');
+  }
+
+  if (callerMember.room.type !== RoomType.GROUP) {
+    throw new BadRequestException('Cannot add members to a direct room');
+  }
+
+  // 2. Verify caller permissions.
+  if (
+    callerMember.role !== MemberRole.OWNER &&
+    callerMember.role !== MemberRole.ADMIN
+  ) {
+    throw new ForbiddenException(
+      'Only room owner or admin can add members',
+    );
+  }
+
+  // 3. Remove duplicate IDs and users who are already members.
+  const existingMembers = await this.prisma.roomMember.findMany({
+    where: { roomId },
+    select: { userId: true },
+  });
+
+  const existingSet = new Set(
+    existingMembers.map((member) => member.userId),
+  );
+
+  const newIds = Array.from(new Set(dto.userIds)).filter(
+    (id) => !existingSet.has(id),
+  );
+
+  if (newIds.length === 0) {
+    return [];
+  }
+
+  // 4. Validate that every requested user exists.
+  const users = await this.prisma.user.findMany({
+    where: {
+      id: { in: newIds },
+    },
+    select: USER_SUMMARY_SELECT,
+  });
+
+  const foundIds = new Set(users.map((user) => user.id));
+
+  const invalidIds = newIds.filter((id) => !foundIds.has(id));
+
+  if (invalidIds.length > 0) {
+    throw new NotFoundException(
+      `The following users were not found: ${invalidIds.join(', ')}`,
+    );
+  }
+
+  // 5. Insert memberships individually.
+  // skipDuplicates handles users added by another concurrent request.
+  const addedMembers: RoomMemberResponse[] = [];
+
+  for (const user of users) {
+    const result = await this.prisma.roomMember.createMany({
+      data: [
+        {
+          roomId,
+          userId: user.id,
+          role: MemberRole.MEMBER,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    // Only include memberships actually created by this request.
+    if (result.count !== 1) {
+      continue;
+    }
+
     const membership = await this.prisma.roomMember.findUnique({
       where: {
         roomId_userId: {
@@ -541,48 +469,18 @@ for (const user of users) {
       },
       include: {
         user: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
+          select: USER_SUMMARY_SELECT,
         },
       },
     });
 
     if (membership) {
-      addedMembers.push(membership);
+      addedMembers.push(this.toMemberResponse(membership));
     }
   }
+
+  return addedMembers;
 }
-
-    // 7. Retrieve their presence.
-    const presenceRes = await this.presenceService.getPresence(
-      userId,
-      addedMembers.map((member) => member.userId),
-    );
-
-    // 8. Return newly added members.
-    return addedMembers.map((member) => ({
-      user: {
-        id: member.user.id,
-        name: member.user.name,
-        image: member.user.image,
-      },
-      role: member.role,
-      joinedAt: member.joinedAt.toISOString(),
-      isOnline: presenceRes.presence[member.userId]?.online ?? false,
-    }));
-    return users.map((u) =>
-      this.toMemberResponse({
-        roomId,
-        userId: u.id,
-        role: MemberRole.MEMBER,
-        joinedAt: now,
-        user: u,
-      }),
-    );
-  }
 
   /**
    * Changes the role of a room member (owner only).
@@ -736,104 +634,102 @@ for (const user of users) {
   /**
    * Updates the user's read cursor up to messageId and records a READ receipt.
    */
-  async markRead(
-    userId: string,
-    roomId: string,
-    dto: MarkReadDto,
-  ): Promise<MarkReadResponse> {
-    const member = await this.prisma.roomMember.findUnique({
-      where: { roomId_userId: { roomId, userId } },
-    });
-    if (!member) {
-      throw new NotFoundException(
-        `Room with ID ${roomId} not found or you are not a member`,
-      );
-    }
+async markRead(
+  userId: string,
+  roomId: string,
+  dto: MarkReadDto,
+): Promise<MarkReadResponse> {
+  const member = await this.prisma.roomMember.findUnique({
+    where: {
+      roomId_userId: { roomId, userId },
+    },
+  });
 
-    const message = await this.prisma.message.findUnique({
-      where: { id: dto.messageId },
-      select: {
-        id: true,
-        roomId: true,
-        senderId: true,
-        createdAt: true,
-      },
-    });
-
-    if (!message || message.roomId !== roomId) {
-      throw new NotFoundException(
-        `Message with ID ${dto.messageId} not found in this room`,
-      );
-    }
-
-    let effectiveCursorId = member.lastReadMessageId;
-
-    const currentCursor = member.lastReadMessageId
-      ? await this.prisma.message.findUnique({
-          where: { id: member.lastReadMessageId },
-          select: {
-            id: true,
-            roomId: true,
-            createdAt: true,
-          },
-        })
-      : null;
-
-    const currentCursorIsValid = currentCursor?.roomId === roomId;
-
-    const shouldAdvanceCursor =
-      !currentCursorIsValid ||
-      message.createdAt > currentCursor.createdAt ||
-      (message.createdAt.getTime() === currentCursor.createdAt.getTime() &&
-        message.id > currentCursor.id);
-
-    if (shouldAdvanceCursor) {
-      await this.prisma.roomMember.update({
-        where: {
-          roomId_userId: { roomId, userId },
-        },
-        data: {
-          lastReadMessageId: message.id,
-        },
-      });
-
-      effectiveCursorId = message.id;
-    }
-
-    const unreadCount = await this.calculateUnreadCount(
-      roomId,
-      userId,
-      effectiveCursorId,
-      member.joinedAt,
+  if (!member) {
+    throw new NotFoundException(
+      `Room with ID ${roomId} not found or you are not a member`,
     );
-    const readAt = new Date();
+  }
 
+  const message = await this.prisma.message.findUnique({
+    where: { id: dto.messageId },
+    select: {
+      id: true,
+      roomId: true,
+      createdAt: true,
+    },
+  });
+
+  if (!message || message.roomId !== roomId) {
+    throw new NotFoundException(
+      `Message with ID ${dto.messageId} not found in this room`,
+    );
+  }
+
+  let effectiveCursorId = member.lastReadMessageId;
+
+  const currentCursor = member.lastReadMessageId
+    ? await this.prisma.message.findUnique({
+        where: { id: member.lastReadMessageId },
+        select: {
+          id: true,
+          roomId: true,
+          createdAt: true,
+        },
+      })
+    : null;
+
+  const currentCursorIsValid = currentCursor?.roomId === roomId;
+
+  const shouldAdvanceCursor =
+    !currentCursorIsValid ||
+    message.createdAt > currentCursor.createdAt ||
+    (message.createdAt.getTime() === currentCursor.createdAt.getTime() &&
+      message.id > currentCursor.id);
+
+  // Advance the cursor only if the requested message is newer.
+  if (shouldAdvanceCursor) {
     await this.prisma.roomMember.update({
-      where: { roomId_userId: { roomId, userId } },
-      data: { lastReadMessageId: dto.messageId },
+      where: {
+        roomId_userId: { roomId, userId },
+      },
+      data: {
+        lastReadMessageId: message.id,
+      },
     });
 
-    await this.prisma.messageReceipt.upsert({
-      where: { messageId_userId: { messageId: dto.messageId, userId } },
-      update: {
-        status: ReceiptStatus.READ,
-        readAt,
-      },
-      create: {
+    effectiveCursorId = message.id;
+  }
+
+  const readAt = new Date();
+
+  // Record the READ receipt for the requested message.
+  await this.prisma.messageReceipt.upsert({
+    where: {
+      messageId_userId: {
         messageId: dto.messageId,
         userId,
-        status: ReceiptStatus.READ,
-        readAt,
       },
-    });
-
-    return {
-      roomId,
+    },
+    update: {
+      status: ReceiptStatus.READ,
+      readAt,
+    },
+    create: {
+      messageId: dto.messageId,
       userId,
-      lastReadMessageId: dto.messageId,
-      readAt: readAt.toISOString(),
-    };
-  }
+      status: ReceiptStatus.READ,
+      readAt,
+    },
+  });
+
+  return {
+    roomId,
+    userId,
+    lastReadMessageId: effectiveCursorId ?? message.id,
+    readAt: readAt.toISOString(),
+  };
+}
 
   // ==========================================
   // HELPER METHODS
