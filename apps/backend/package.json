@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "prisma:generate": "pnpm prisma generate",
-    "postinstall": "pnpm prisma generate",
+    "postinstall": "pnpm prisma:generate",
     "build": "nest build",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
