@@ -17,7 +17,7 @@ import { PresenceService } from './presence.service.js';
 import { TypingService } from './typing.service.js';
 import { MessagesService } from '../messages/messages.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { RealtimeEmitter } from '../realtime/realtime-emitter.service.js';
+import { RealtimeEmitter, userChannel } from '../realtime/realtime-emitter.service.js';
 import { ReceiptStatus } from '../generated/prisma/enums.js';
 import { JoinRoomWsDto } from './dto/ws/join-room.ws-dto.js';
 import { LeaveRoomWsDto } from './dto/ws/leave-room.ws-dto.js';
@@ -92,6 +92,8 @@ export class ChatGateway
       }
 
       client.data.user = user;
+      // Personal channel: lets REST services push events (e.g. a new DM) to this user.
+      await client.join(userChannel(user.id));
       const isFirst = await this.presenceService.addConnection(user.id, client.id);
 
       if (isFirst && this.server) {
