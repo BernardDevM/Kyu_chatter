@@ -15,9 +15,9 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { RoomMemberParamDto } from '../common/dto/room-member-param.dto.js';
@@ -58,6 +58,8 @@ import {
 
 
 export class RoomsController {
+  
+  constructor(private readonly roomsService: RoomsService) {}
   constructor(
     private readonly roomsService: RoomsService,
     @Optional() private readonly realtime?: RealtimeEmitter,

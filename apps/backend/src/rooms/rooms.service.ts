@@ -4,7 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MemberRole, ReceiptStatus, RoomType } from '../generated/prisma/enums.js';
+import {
+  MemberRole,
+  ReceiptStatus,
+  RoomType,
+} from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type {
   MarkReadResponse,
@@ -53,10 +57,36 @@ export class RoomsService {
     userId: string,
     dto: CreateGroupRoomDto,
   ): Promise<RoomDetailResponse> {
+    // Remove duplicate IDs and prevent adding the creator twice.
     const uniqueMemberIds = Array.from(
       new Set(dto.memberUserIds.filter((id) => id !== userId)),
     );
 
+    // Validate that all requested members exist.
+    if (uniqueMemberIds.length > 0) {
+      const existingUsers = await this.prisma.user.findMany({
+        where: {
+          id: { in: uniqueMemberIds },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const existingUserIds = new Set(existingUsers.map((user) => user.id));
+
+      const invalidMemberIds = uniqueMemberIds.filter(
+        (id) => !existingUserIds.has(id),
+      );
+
+      if (invalidMemberIds.length > 0) {
+        throw new NotFoundException(
+          `The following users were not found: ${invalidMemberIds.join(', ')}`,
+        );
+      }
+    }
+
+    // Create the group and all memberships atomically.
     if (uniqueMemberIds.length === 0) {
       throw new BadRequestException(
         'memberUserIds must include at least one user other than yourself',
@@ -79,7 +109,10 @@ export class RoomsService {
         createdById: userId,
         members: {
           create: [
-            { userId, role: MemberRole.OWNER },
+            {
+              userId,
+              role: MemberRole.OWNER,
+            },
             ...uniqueMemberIds.map((memberId) => ({
               userId: memberId,
               role: MemberRole.MEMBER,
@@ -100,6 +133,10 @@ export class RoomsService {
     userId: string,
     dto: CreateDirectRoomDto,
   ): Promise<RoomDetailResponse> {
+    if (userId === dto.userId) {
+      throw new BadRequestException(
+        'Cannot create a direct room with yourself',
+      );
     if (userId === dto.targetUserId) {
       throw new BadRequestException('Cannot create a direct room with yourself');
     }
@@ -129,6 +166,79 @@ export class RoomsService {
             members: {
               create: [
                 { userId, role: MemberRole.MEMBER },
+                { userId: dto.userId, role: MemberRole.MEMBER },
+              ],
+            },
+          },
+          include: {
+            members: {
+              include: {
+                user: {
+                  select: { id: true, name: true, image: true },
+                },
+              },
+            },
+            preferences: {
+              where: { userId },
+            },
+            messages: {
+              take: 1,
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              include: {
+                sender: {
+                  select: { id: true, name: true, image: true },
+                },
+                attachments: { include: { media: true } },
+                reactions: true,
+              },
+            },
+          },
+        });
+      } catch (error: unknown) {
+        // Prisma P2002 means a unique constraint was violated.
+        const isUniqueConstraintError =
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'P2002';
+
+        if (!isUniqueConstraintError) {
+          throw error;
+        }
+
+        // Another request may have created this direct room first.
+        room = await this.prisma.room.findUnique({
+          where: { directKey },
+          include: {
+            members: {
+              include: {
+                user: {
+                  select: { id: true, name: true, image: true },
+                },
+              },
+            },
+            preferences: {
+              where: { userId },
+            },
+            messages: {
+              take: 1,
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              include: {
+                sender: {
+                  select: { id: true, name: true, image: true },
+                },
+                attachments: { include: { media: true } },
+                reactions: true,
+              },
+            },
+          },
+        });
+
+        // If the conflicting record was not our directKey,
+        // preserve and propagate the original database error.
+        if (!room) {
+          throw error;
+        }
                 { userId: dto.targetUserId, role: MemberRole.MEMBER },
               ],
             },
@@ -196,8 +306,9 @@ export class RoomsService {
     const limit = query.limit ?? 30;
     const pageMemberships = filtered.slice(startIndex, startIndex + limit);
     const hasMore = startIndex + limit < filtered.length;
-    const nextCursor =
-      hasMore ? pageMemberships[pageMemberships.length - 1]?.room.id ?? null : null;
+    const nextCursor = hasMore
+      ? (pageMemberships[pageMemberships.length - 1]?.room.id ?? null)
+      : null;
 
     const items = await Promise.all(
       pageMemberships.map((m) => this.toRoomSummary(m.room, m, userId)),
@@ -328,17 +439,25 @@ export class RoomsService {
     roomId: string,
     dto: AddMembersDto,
   ): Promise<RoomMemberResponse[]> {
+    // 1. Verify caller membership and room type.
     const callerMember = await this.prisma.roomMember.findUnique({
-      where: { roomId_userId: { roomId, userId } },
-      include: { room: true },
+      where: {
+        roomId_userId: { roomId, userId },
+      },
+      include: {
+        room: true,
+      },
     });
 
     if (!callerMember) {
       throw new ForbiddenException('You are not a member of this room');
     }
+
     if (callerMember.room.type !== RoomType.GROUP) {
       throw new BadRequestException('Cannot add members to a direct room');
     }
+
+    // 2. Verify caller permissions.
     if (
       callerMember.role !== MemberRole.OWNER &&
       callerMember.role !== MemberRole.ADMIN
@@ -346,11 +465,14 @@ export class RoomsService {
       throw new ForbiddenException('Only room owner or admin can add members');
     }
 
+    // 3. Remove duplicate IDs and existing members.
     const existingMembers = await this.prisma.roomMember.findMany({
       where: { roomId },
       select: { userId: true },
     });
-    const existingSet = new Set(existingMembers.map((m) => m.userId));
+
+    const existingSet = new Set(existingMembers.map((member) => member.userId));
+
     const newIds = Array.from(new Set(dto.userIds)).filter(
       (id) => !existingSet.has(id),
     );
@@ -359,24 +481,98 @@ export class RoomsService {
       return [];
     }
 
+    // 4. Validate that every requested user exists.
     const users = await this.prisma.user.findMany({
       where: { id: { in: newIds } },
       select: USER_SUMMARY_SELECT,
     });
+
+    const foundIds = new Set(users.map((user) => user.id));
+
+    const invalidIds = newIds.filter((id) => !foundIds.has(id));
+
+    if (invalidIds.length > 0) {
+      throw new NotFoundException(
+        `The following users were not found: ${invalidIds.join(', ')}`,
+      );
+    }
+
     if (users.length === 0) {
       return [];
     }
 
-    const now = new Date();
-    await this.prisma.roomMember.createMany({
-      data: users.map((u) => ({
+    // 5. Create memberships.
+const now = new Date();
+
+await this.prisma.roomMember.createMany({
+  data: users.map((u) => ({
+    roomId,
+    userId: u.id,
+    role: MemberRole.MEMBER,
+    joinedAt: now,
+  })),
+  skipDuplicates: true,
+});
+
+// 6. Retrieve the newly added memberships.
+// 5. Create memberships and identify users added by this request.
+const addedMembers = [];
+
+for (const user of users) {
+  const result = await this.prisma.roomMember.createMany({
+    data: [
+      {
         roomId,
-        userId: u.id,
+        userId: user.id,
         role: MemberRole.MEMBER,
-        joinedAt: now,
-      })),
+      },
+    ],
+    skipDuplicates: true,
+  });
+
+  // count === 1 means this request actually inserted the membership.
+  if (result.count === 1) {
+    const membership = await this.prisma.roomMember.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId: user.id,
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          },
+        },
+      },
     });
 
+    if (membership) {
+      addedMembers.push(membership);
+    }
+  }
+}
+
+    // 7. Retrieve their presence.
+    const presenceRes = await this.presenceService.getPresence(
+      userId,
+      addedMembers.map((member) => member.userId),
+    );
+
+    // 8. Return newly added members.
+    return addedMembers.map((member) => ({
+      user: {
+        id: member.user.id,
+        name: member.user.name,
+        image: member.user.image,
+      },
+      role: member.role,
+      joinedAt: member.joinedAt.toISOString(),
+      isOnline: presenceRes.presence[member.userId]?.online ?? false,
+    }));
     return users.map((u) =>
       this.toMemberResponse({
         roomId,
@@ -409,7 +605,9 @@ export class RoomsService {
       throw new BadRequestException('Cannot change roles in a direct room');
     }
     if (callerMember.role !== MemberRole.OWNER) {
-      throw new ForbiddenException('Only the room owner can change member roles');
+      throw new ForbiddenException(
+        'Only the room owner can change member roles',
+      );
     }
     if (targetUserId === userId) {
       throw new BadRequestException('Cannot change your own role as owner');
@@ -554,13 +752,60 @@ export class RoomsService {
 
     const message = await this.prisma.message.findUnique({
       where: { id: dto.messageId },
+      select: {
+        id: true,
+        roomId: true,
+        senderId: true,
+        createdAt: true,
+      },
     });
+
     if (!message || message.roomId !== roomId) {
       throw new NotFoundException(
         `Message with ID ${dto.messageId} not found in this room`,
       );
     }
 
+    let effectiveCursorId = member.lastReadMessageId;
+
+    const currentCursor = member.lastReadMessageId
+      ? await this.prisma.message.findUnique({
+          where: { id: member.lastReadMessageId },
+          select: {
+            id: true,
+            roomId: true,
+            createdAt: true,
+          },
+        })
+      : null;
+
+    const currentCursorIsValid = currentCursor?.roomId === roomId;
+
+    const shouldAdvanceCursor =
+      !currentCursorIsValid ||
+      message.createdAt > currentCursor.createdAt ||
+      (message.createdAt.getTime() === currentCursor.createdAt.getTime() &&
+        message.id > currentCursor.id);
+
+    if (shouldAdvanceCursor) {
+      await this.prisma.roomMember.update({
+        where: {
+          roomId_userId: { roomId, userId },
+        },
+        data: {
+          lastReadMessageId: message.id,
+        },
+      });
+
+      effectiveCursorId = message.id;
+    }
+
+    const unreadCount = await this.calculateUnreadCount(
+      roomId,
+      userId,
+      effectiveCursorId,
+      member.joinedAt,
+    );
     const readAt = new Date();
 
     await this.prisma.roomMember.update({
@@ -594,11 +839,13 @@ export class RoomsService {
   // HELPER METHODS
   // ==========================================
 
-  private extractPreferences(pref?: {
-    isMuted: boolean;
-    isArchived: boolean;
-    isPinned: boolean;
-  } | null): RoomPreferenceResponse {
+  private extractPreferences(
+    pref?: {
+      isMuted: boolean;
+      isArchived: boolean;
+      isPinned: boolean;
+    } | null,
+  ): RoomPreferenceResponse {
     return {
       isMuted: pref?.isMuted ?? false,
       isArchived: pref?.isArchived ?? false,
@@ -685,36 +932,51 @@ export class RoomsService {
     lastReadMessageId?: string | null,
     joinedAt?: Date,
   ): Promise<number> {
+    const baseWhere = {
+      roomId,
+      senderId: { not: userId },
+      ...(joinedAt ? { createdAt: { gte: joinedAt } } : {}),
+    };
+
     if (!lastReadMessageId) {
       return this.prisma.message.count({
-        where: {
-          roomId,
-          senderId: { not: userId },
-          ...(joinedAt ? { createdAt: { gte: joinedAt } } : {}),
-        },
+        where: baseWhere,
       });
     }
 
     const lastReadMessage = await this.prisma.message.findUnique({
       where: { id: lastReadMessageId },
-      select: { createdAt: true },
+      select: {
+        id: true,
+        roomId: true,
+        createdAt: true,
+      },
     });
 
-    if (!lastReadMessage) {
+    // If the cursor message was deleted or does not belong to this room,
+    // fall back to counting messages since the member joined.
+    if (!lastReadMessage || lastReadMessage.roomId !== roomId) {
       return this.prisma.message.count({
-        where: {
-          roomId,
-          senderId: { not: userId },
-          ...(joinedAt ? { createdAt: { gte: joinedAt } } : {}),
-        },
+        where: baseWhere,
       });
     }
 
     return this.prisma.message.count({
       where: {
-        roomId,
-        senderId: { not: userId },
-        createdAt: { gt: lastReadMessage.createdAt },
+        ...baseWhere,
+        OR: [
+          {
+            createdAt: {
+              gt: lastReadMessage.createdAt,
+            },
+          },
+          {
+            createdAt: lastReadMessage.createdAt,
+            id: {
+              gt: lastReadMessage.id,
+            },
+          },
+        ],
       },
     });
   }
