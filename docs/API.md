@@ -119,7 +119,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 | Method | Path | Status | Response Shape | Description |
 |---|---|---|---|---|
 | `GET` | `/health/live` | 200 | `{"status": "ok"}` | Liveness probe (process responsive) |
-| `GET` | `/health/ready` | 200/503 | `{"status": "ok"\|"degraded", "checks": {"database": "up"\|"down", "redis": "up"\|"down"}}` | Readiness probe (verifies database `SELECT 1` and `redis.ping()`) |
+| `GET` | `/health/ready` | 200 / 503 | `{"status": "ok"\|"degraded", "checks": {"database": "up"\|"down", "redis": "up"\|"down"}}` | Readiness probe (verifies database `SELECT 1` and `redis.ping()`; returns 200 if both up, 503 Service Unavailable if degraded) |
 | `GET` | `/health/node` | 200 | `{"nodeId": "node-1", "uptimeSeconds": 120, "timestamp": "..."}` | Returns current node identifier and system uptime |
 
 ---

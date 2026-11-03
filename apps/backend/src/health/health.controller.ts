@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator.js';
 import { getNodeId } from '../common/utils/node-id.js';
@@ -63,13 +63,20 @@ export class HealthController {
       redis = 'down';
     }
 
-    return {
-      status: database === 'up' && redis === 'up' ? 'ok' : 'degraded',
+    const isHealthy = database === 'up' && redis === 'up';
+    const result: HealthReadyResponse = {
+      status: isHealthy ? 'ok' : 'degraded',
       checks: {
         database,
         redis,
       },
     };
+
+    if (!isHealthy) {
+      throw new ServiceUnavailableException(result);
+    }
+
+    return result;
   }
 
   /**
