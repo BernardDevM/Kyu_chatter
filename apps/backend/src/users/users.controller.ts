@@ -2,7 +2,6 @@ import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
@@ -16,20 +15,9 @@ import type {
   UserSummaryResponse,
 } from './dto/user.response.js';
 
-import { UseGuards } from '@nestjs/common';
-
-import {
-  AuthGuard,
-  OptionalAuth,
-} from '@thallesp/nestjs-better-auth';
-
-
-
 @ApiTags('Users')
 @ApiBearerAuth('session-auth')
 @Controller('api/users')
-@UseGuards(AuthGuard)
-@OptionalAuth()
 
 
 
