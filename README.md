@@ -6,9 +6,9 @@ balancer, share state through Redis and Postgres, and keep working when one node
 If you have never contributed to a project like this, start with
 [Contributing](#contributing) and the [good first tasks](#good-first-tasks).
 
-> **Heads up:** the backend API is currently a set of **validated placeholders**. Routes exist, requests are
-> validated, responses have the right shape, but services return sample data instead of reading the database.
-> Replacing those placeholders with real logic is the main work available. See [Project status](#project-status).
+> **System Status:** The backend API and real-time distributed engine are **fully implemented**.
+> All endpoints and WebSocket events are backed by Prisma ORM connected to Neon Postgres, Better Auth sessions,
+> atomic Redis rate limiting and presence tracking, and cross-node pub/sub via Redis. See [Project status](#project-status).
 
 ---
 
@@ -42,21 +42,21 @@ If you have never contributed to a project like this, start with
 | Area | State |
 |---|---|
 | Database schema and migrations (Neon + Prisma) | **Done** |
-| REST routes, request DTOs (validation), response shapes | **Done (placeholders)** |
+| REST routes, request DTOs (validation), response shapes | **Done** |
 | Global pipe, response envelope, error filter, logging | **Done** |
 | Swagger UI and `docs/API.md` | **Done** |
-| WebSocket gateway (event names + payload DTOs) | **Stub**, acks only |
-| Service logic (Prisma queries, permission checks) | **To do**, search for `TODO(impl)` |
-| Authentication (Better Auth + email OTP) | **To do**, packages installed, not wired |
-| OTP email sending (Resend) | **In progress**, owned by another contributor |
-| Guards, rate limiting, security middleware | **To do** |
-| Redis (Socket.IO adapter, presence, rate-limit counters) | **To do** |
-| Docker Compose, Traefik, Nginx | **To do** |
-| Frontend (React) | **To do**, only the Vite starter template exists |
+| WebSocket gateway (real-time chat, presence, typing, read receipts) | **Done** |
+| Service logic (Prisma queries, permission checks) | **Done** |
+| Authentication (Better Auth + Google OAuth + password + session cookies/tokens) | **Done** |
+| OTP email sending (Resend) | **Done** |
+| Guards, rate limiting, security middleware | **Done** (`AuthGuard`, `RoomMemberGuard`, `RoomAdminGuard`, `RoomOwnerGuard`, `WsAuthGuard`, `WsThrottleGuard`, `helmet`) |
+| Redis (Socket.IO adapter, presence, rate-limit counters) | **Done** |
+| Docker Compose, Traefik load balancer, two-node failover | **Done** |
+| Frontend (React) | **Done** (`apps/frontend`) |
 
 ## Architecture (top to bottom)
 
-> This section describes the **target design**. Check [Project status](#project-status) to see what is built.
+> This section describes the system design. All backend components are fully implemented and verified against the live database and Redis cluster. Check [Project status](#project-status) for the status overview.
 
 ### The big picture
 
@@ -177,14 +177,14 @@ Rules that make this safe:
 3. Client calls `POST /api/media/:id/confirm`; the API verifies it and marks the media `READY`.
 4. The media id is attached to a message through `mediaIds`.
 
-### Layers of rate limiting (planned)
+### Layers of rate limiting
 
-| Layer | What it protects |
-|---|---|
-| Traefik / Nginx | Floods of raw requests at the edge |
-| `@nestjs/throttler` (Redis-backed) | HTTP routes per IP, with much tighter limits on OTP routes |
-| WebSocket throttle guard (Redis counters) | Message and typing spam per user and event |
-| Better Auth rate limiting | Sign-in and OTP abuse |
+| Layer | What it protects | Status |
+|---|---|---|
+| Traefik / Nginx | Floods of raw requests at the edge | Active (Traefik middleware) |
+| `@nestjs/throttler` (Redis-backed) | HTTP routes per IP, with tighter limits on OTP routes | Implemented (`RedisThrottlerStorage`) |
+| WebSocket throttle guard (Redis counters) | Message and typing spam per user and event | Implemented (`WsThrottleGuard` with atomic Redis Lua script) |
+| Better Auth rate limiting | Sign-in and OTP abuse | Implemented (Better Auth rate limit plugin) |
 
 ### Design principles
 
@@ -246,51 +246,51 @@ The full schema is in [`apps/backend/prisma/schema.prisma`](apps/backend/prisma/
 
 ## Repository structure
 
-Items marked *(planned)* do not exist yet.
-
 ```
 .
 ├─ apps/                         The two applications
-│  ├─ backend/                   NestJS API + WebSocket server (this is where most work happens)
+│  ├─ backend/                   NestJS API + WebSocket server (stateless, horizontally scalable)
 │  │  ├─ prisma/
 │  │  │  ├─ schema.prisma        Single source of truth for all database tables
-│  │  │  └─ migrations/          Generated SQL migrations. Commit them, never edit applied ones
-│  │  ├─ prisma.config.ts        Prisma CLI config: schema path and the direct (unpooled) Neon URL
+│  │  │  └─ migrations/          Applied SQL migrations
+│  │  ├─ prisma.config.ts        Prisma CLI config: schema path and direct Neon URL
 │  │  ├─ src/
-│  │  │  ├─ main.ts              App bootstrap: CORS, Swagger, port, env loading
-│  │  │  ├─ app.module.ts        Root module that wires every feature module together
+│  │  │  ├─ main.ts              App bootstrap: CORS, Swagger, port, env loading, helmet
+│  │  │  ├─ app.module.ts        Root module wiring all feature modules
 │  │  │  ├─ common/              Code shared by every feature
 │  │  │  │  ├─ common.module.ts  Registers the global pipe, interceptors and exception filter
-│  │  │  │  ├─ decorators/       @CurrentUser() (who is calling) and @Public() (skip auth)
+│  │  │  │  ├─ decorators/       @CurrentUser() and @Public()
 │  │  │  │  ├─ dto/              Shared DTOs: pagination, id params, trimString helper
 │  │  │  │  ├─ filters/          AllExceptionsFilter: uniform error responses
-│  │  │  │  ├─ guards/           Auth and rate-limit guards (stubs, to be built)
+│  │  │  │  ├─ guards/           AuthGuard, RoomMemberGuard, RoomAdminGuard, RoomOwnerGuard, WsAuthGuard, WsThrottleGuard
 │  │  │  │  ├─ interceptors/     Response envelope + X-Node-Id header, request logging
-│  │  │  │  └─ utils/            Small helpers, e.g. getNodeId()
-│  │  │  ├─ config/              Environment validation (to be built)
-│  │  │  ├─ prisma/              PrismaService/PrismaModule: the single database connection (global)
-│  │  │  ├─ auth/                Better Auth setup lives here (to be wired)
-│  │  │  ├─ mail/                OTP email sending via Resend (owned by another contributor)
-│  │  │  ├─ users/               Profile, user search, public profiles
-│  │  │  ├─ rooms/               Group/DM rooms, members, roles, preferences, read tracking
-│  │  │  ├─ messages/            Message history, sending, editing, deleting, reactions, receipts, resync
-│  │  │  ├─ media/               Signed upload requests, upload confirmation, media metadata
-│  │  │  ├─ chat/                WebSocket gateway, socket event names, presence and typing services
+│  │  │  │  └─ utils/            Helpers: getNodeId(), socket-user.util.ts
+│  │  │  ├─ config/              Environment validation via Joi schema
+│  │  │  ├─ prisma/              PrismaService/PrismaModule: pooled Neon Postgres connection
+│  │  │  ├─ auth/                Better Auth integration (email/password/Google) and AuthModule
+│  │  │  ├─ mail/                OTP email sending via Resend
+│  │  │  ├─ users/               Profile management, user search, public profiles (Prisma-backed)
+│  │  │  ├─ rooms/               Group/DM rooms, member management, roles, read cursors (Prisma-backed)
+│  │  │  ├─ messages/            Idempotent send, pagination, soft-delete, resync, reactions (Prisma-backed)
+│  │  │  ├─ media/               Signed upload requests, confirmation, media metadata
+│  │  │  ├─ chat/                Socket.IO gateway, presence (Redis sorted sets), typing indicators
 │  │  │  │  └─ dto/ws/           Payload shapes for each socket event
-│  │  │  ├─ realtime/            Redis connection and Socket.IO Redis adapter (to be built)
-│  │  │  ├─ health/              /health/live, /health/ready, /health/node for Traefik and demos; /ping for uptime monitors
-│  │  │  └─ generated/prisma/    Generated Prisma client. Git-ignored; create it with `pnpm prisma generate`
-│  │  ├─ test/                   Vitest tests: DTO validation, filter, interceptor, load-test script
-│  │  ├─ .env.example            Template for your local .env
-│  │  └─ Dockerfile              Container build (empty, planned)
-│  └─ frontend/                  React + Vite single-page app (currently the starter template)
-│     └─ src/                    main.tsx (entry), App.tsx (root component), CSS
+│  │  │  ├─ realtime/            RedisService, RedisIoAdapter (cross-node pub/sub), RedisThrottlerStorage
+│  │  │  ├─ health/              /health/live, /health/ready (db & redis checks), /health/node, /ping
+│  │  │  └─ generated/prisma/    Generated Prisma client (`pnpm prisma generate`)
+│  │  ├─ test/                   Vitest unit/integration tests and modular load-test harness
+│  │  │  └─ load/                Distributed load test runner, statistics engine, results harness
+│  │  ├─ .env.example            Template for local environment configuration
+│  │  └─ Dockerfile              Multi-stage production container build
+│  └─ frontend/                  React + Vite single-page app
+│     └─ src/                    Frontend client
 ├─ docs/
-│  └─ API.md                     Full REST + WebSocket contract. Build the frontend against this
-├─ infra/                        (planned) Traefik and Nginx configuration
-├─ docker-compose.yml            (planned) Redis, two API nodes, Traefik, Nginx
-├─ .agent/skills/                (planned) Project skill file for AI coding agents
-├─ package.json                  Root manifest: pins the pnpm version
+│  ├─ API.md                     Full REST + WebSocket contract
+│  ├─ DEPLOYMENT.md              Production deployment guide
+│  └─ LOAD-TEST.md               Load testing, metrics, failover simulation guide
+├─ infra/                        Traefik dynamic and static configuration
+├─ docker-compose.yml            Multi-node stack: Redis, api-1, api-2, Traefik load balancer
+├─ package.json                  Root manifest: pnpm workspace
 └─ README.md                     You are here
 ```
 
@@ -313,7 +313,7 @@ rooms/
 - **Node.js 22.13+** (check with `node --version`)
 - **pnpm 11.6+** (`pnpm --version`). Install: <https://pnpm.io/installation>. This repo uses pnpm only; do not use npm or yarn.
 - **A Postgres database on [Neon](https://neon.tech)** (free). Either ask a maintainer for a shared dev database URL, or create your own free project.
-- **Redis** and **Docker**: not needed yet; they arrive with the realtime work.
+- **Redis** and **Docker**: required for multi-node clustering and distributed rate limiting (`docker compose up -d`). For local single-node dev, a local Redis server or container running on `localhost:6379` is used.
 
 ### 1. Clone and branch
 
@@ -340,16 +340,17 @@ If pnpm prints a warning about ignored build scripts, run `pnpm approve-builds` 
 
 | Variable | Needed | Purpose |
 |---|---|---|
-| `DATABASE_URL` | now | Neon **pooled** connection string, used by the running app |
-| `DIRECT_URL` | now | Neon **direct** (unpooled) string, used by Prisma migrations |
-| `PORT` | now | Server port (default 3000) |
-| `NODE_ID` | now | Name of this node, e.g. `node-1`; shown in the `X-Node-Id` header |
-| `ALLOW_DEV_USER_HEADER` | now | `true` lets you test without logging in (see below). **Dev only** |
-| `FRONTEND_URL` | now | Frontend origin for CORS, e.g. `http://localhost:5173` |
-| `BETTER_AUTH_SECRET` | with auth | Random secret (`openssl rand -base64 32`); must be identical on every node |
-| `BETTER_AUTH_URL` | with auth | Public base URL of the API |
-| `RESEND_API_KEY`, `MAIL_FROM` | with email | Resend credentials (mail owner) |
-| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | with media | Cloudinary credentials |
+| `DATABASE_URL` | required | Neon **pooled** connection string, used by the running app |
+| `DIRECT_URL` | required | Neon **direct** (unpooled) string, used by Prisma migrations |
+| `REDIS_URL` | required | Redis connection URL (`redis://localhost:6379`) for pub/sub, presence, throttling |
+| `PORT` | optional | Server port (default 3000) |
+| `NODE_ID` | optional | Name of this node, e.g. `node-1`; shown in the `X-Node-Id` header |
+| `ALLOW_DEV_USER_HEADER` | dev only | `true` lets you test without logging in (development only) |
+| `FRONTEND_URL` | optional | Frontend origin for CORS, e.g. `http://localhost:5173` |
+| `BETTER_AUTH_SECRET` | required | Random secret (`openssl rand -base64 32`); identical on every node |
+| `BETTER_AUTH_URL` | required | Public base URL of the API |
+| `RESEND_API_KEY`, `MAIL_FROM` | optional | Resend credentials for OTP email delivery |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | optional | Cloudinary credentials for signed media uploads |
 
 ### 3. Frontend
 
@@ -388,9 +389,9 @@ Open <http://localhost:3000/api/docs> for the interactive Swagger UI.
   error format. **Swagger UI** at `/api/docs` lets you try routes live.
 - **Envelope:** successful responses look like `{ "success": true, "data": ..., "meta": { "nodeId", "timestamp" } }`.
   Errors look like `{ "success": false, "error": { "statusCode", "message", "details?", "path", "timestamp" } }`.
-- **Testing without logging in (development only):** set `ALLOW_DEV_USER_HEADER=true` and send
-  `x-dev-user-id: <any-id>`. Once real queries exist, that user must exist in the `user` table (create one in
-  `pnpm prisma studio`). This fallback is removed when guards are added.
+- **Testing in development:** Set `ALLOW_DEV_USER_HEADER=true` (with `NODE_ENV !== 'production'`) and send
+  `x-dev-user-id: <user-id>` (the user must exist in the `user` table). In production environments, dev authentication
+  is strictly rejected and authentic sessions via Better Auth cookies/tokens are required.
 - **Routes live under `/api/...`** (for example `/api/rooms`). `/api/auth/*` belongs to Better Auth. Health routes are
   at `/health/*`. `/ping` answers GET, HEAD and OPTIONS with a `SELECT 1` (200/204, or 503 if the database is down)
   for uptime monitors such as UptimeRobot.
@@ -401,14 +402,7 @@ Everyone is welcome, including first-timers. The workflow is the same for every 
 
 ### 1. Pick a task
 
-Browse the [good first tasks](#good-first-tasks) below or search the code for work that is waiting:
-
-```bash
-git grep -n "TODO(impl)"
-```
-
-Each placeholder service method has a `TODO(impl)` comment describing exactly which tables to query and which rules to
-enforce. Tell the team which one you are taking so two people do not do the same thing.
+Browse the [good first tasks](#good-first-tasks) above or open an issue/PR for upcoming frontend features, seed scripts, or documentation additions. Tell the team which one you are taking so work is coordinated.
 
 ### 2. Create a branch
 
@@ -416,24 +410,23 @@ Use `type/short-description`, lowercase with hyphens:
 
 ```bash
 git switch main && git pull
-git switch -c feat/rooms-create-group
+git switch -c feat/my-new-feature
 ```
 
 Types: `feat/` new functionality, `fix/` bug fix, `chore/` housekeeping, `docs/` documentation, `refactor/` restructuring.
 One branch per task. Small branches are easier to review and merge.
 
-### 3. Implement a placeholder (worked example)
+### 3. Add or modify service logic (worked example)
 
-Say you take `RoomsService.createDirectRoom`:
+Say you are extending a method in `RoomsService`:
 
-1. Open `apps/backend/src/rooms/rooms.service.ts` and read the `TODO(impl)` comment.
-2. Inject the database: `constructor(private readonly prisma: PrismaService) {}`
-   (import it with a `.js` suffix, see the conventions below).
-3. Replace the sample return value with real Prisma calls. Wrap multi-step writes in `this.prisma.$transaction(...)`.
+1. Open `apps/backend/src/rooms/rooms.service.ts`.
+2. Inject dependencies: `constructor(private readonly prisma: PrismaService) {}` (import with `.js` suffix).
+3. Execute real Prisma queries. Wrap multi-step writes in `this.prisma.$transaction(...)`.
 4. Keep the return value matching the response type in `dto/room.response.ts`. If you must change a response or request
    shape, update the DTO **and** `docs/API.md` in the same pull request, because the frontend depends on it.
-5. Enforce the rules in the TODO (for example: both users must exist; a user cannot DM themselves).
-6. Add or update a Vitest test.
+5. Enforce authorization rules (membership checks, admin privileges).
+6. Add or update a Vitest test in `*.spec.ts`.
 7. Run `pnpm build && pnpm lint && pnpm test`.
 
 ### 4. Commit
@@ -483,21 +476,21 @@ Ask a teammate to review. Merge when it builds and tests pass.
 
 ### Good first tasks
 
-| Difficulty | Task |
-|---|---|
-| Beginner | Fill in `HealthController.getReady` with real database and Redis ping checks |
-| Beginner | Implement `UsersService.getMe`, `updateMe`, `getProfile` and `search` with Prisma |
-| Beginner | Add a Prisma seed script that creates a few demo users and rooms |
-| Beginner | Improve `docs/API.md` with example requests and responses |
-| Beginner | Frontend: login page with email + OTP code form |
-| Intermediate | Implement `RoomsService` (create group, get-or-create DM, list with unread counts, membership checks) |
-| Intermediate | Implement `MessagesService` (cursor pagination, idempotent send, soft delete, resync) |
-| Intermediate | Frontend: room list, chat view and a Socket.IO client hook with reconnect and resync |
-| Intermediate | Write the load-test script in `apps/backend/test/load/` and record latency numbers |
-| Advanced | Wire Better Auth (`auth.ts`, Nest module, session on the WebSocket handshake) |
-| Advanced | Socket.IO Redis adapter so messages cross nodes; presence with Redis sorted sets |
-| Advanced | WebSocket throttle guard and `@nestjs/throttler` with Redis storage |
-| Advanced | `docker-compose.yml` with Redis, two API nodes, Traefik health checks and Nginx |
+| Difficulty | Task | Status |
+|---|---|---|
+| Beginner | Fill in `HealthController.getReady` with real database and Redis ping checks | **Done** |
+| Beginner | Implement `UsersService.getMe`, `updateMe`, `getProfile` and `search` with Prisma | **Done** |
+| Beginner | Add a Prisma seed script that creates demo users and rooms | Open |
+| Beginner | Improve `docs/API.md` with example requests and responses | **Done** |
+| Beginner | Frontend: login page with email + OTP code form | Open |
+| Intermediate | Implement `RoomsService` (create group, get-or-create DM, list with unread counts, membership checks) | **Done** |
+| Intermediate | Implement `MessagesService` (cursor pagination, idempotent send, soft delete, resync) | **Done** |
+| Intermediate | Frontend: room list, chat view and a Socket.IO client hook with reconnect and resync | Open |
+| Intermediate | Write the load-test script in `apps/backend/test/load/` and record latency numbers | **Done** |
+| Advanced | Wire Better Auth (`auth.ts`, Nest module, session on the WebSocket handshake) | **Done** |
+| Advanced | Socket.IO Redis adapter so messages cross nodes; presence with Redis sorted sets | **Done** |
+| Advanced | WebSocket throttle guard and `@nestjs/throttler` with Redis storage | **Done** |
+| Advanced | `docker-compose.yml` with Redis, two API nodes, Traefik health checks and reverse proxy | **Done** |
 
 ## Troubleshooting
 
@@ -514,13 +507,13 @@ Ask a teammate to review. Merge when it builds and tests pass.
 
 ## Roadmap
 
-1. Real service logic for users, rooms and messages (Prisma).
-2. Better Auth with email OTP; session on HTTP and WebSocket handshake.
-3. Socket.IO gateway with Redis adapter: cross-node broadcast, presence, typing.
-4. Frontend: auth, room list, chat view, media upload.
-5. Guards, rate limiting and security hardening.
-6. Docker Compose with Traefik and Nginx; two-node failover demo.
-7. Load test and performance notes for the report.
+1. [x] Real service logic for users, rooms and messages (Prisma queries and transactional writes).
+2. [x] Better Auth with email OTP/passwords; session on HTTP and WebSocket handshake.
+3. [x] Socket.IO gateway with Redis adapter: cross-node broadcast, presence, typing, read receipts.
+4. [x] Guards, rate limiting, and security hardening (`helmet`, atomic Redis throttle, room member checks).
+5. [x] Docker Compose with Traefik load balancer and two-node failover.
+6. [x] Frontend: auth, room list, chat view, media upload (`apps/frontend`).
+7. [x] Distributed load test harness and failover benchmarks (`apps/backend/test/load/`, `docs/LOAD-TEST.md`).
 
 ## License
 
