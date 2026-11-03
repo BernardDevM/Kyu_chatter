@@ -46,7 +46,6 @@ import {
 @ApiTags('Rooms')
 @ApiBearerAuth('session-auth')
 @ApiSecurity('dev-user-id')
-@Controller('api/room s')
 @UseGuards(AuthGuard)
 @Controller('api/rooms')
 
