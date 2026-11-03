@@ -59,3 +59,4 @@ export const prismaAdapterInstance = new PrismaPg(dbPool);
 export const prisma = new PrismaClient({
   adapter: prismaAdapterInstance,
 });
+

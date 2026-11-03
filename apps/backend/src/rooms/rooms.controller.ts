@@ -14,9 +14,9 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
-  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { RoomMemberParamDto } from '../common/dto/room-member-param.dto.js';
@@ -45,14 +45,13 @@ import {
 
 @ApiTags('Rooms')
 @ApiBearerAuth('session-auth')
-@ApiSecurity('dev-user-id')
-@Controller('api/room s')
 @UseGuards(AuthGuard)
 @Controller('api/rooms')
 
 
 
 export class RoomsController {
+  
   constructor(private readonly roomsService: RoomsService) {}
 
   /**
