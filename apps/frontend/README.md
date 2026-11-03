@@ -28,5 +28,3 @@ app/
 
 State: server data in React Query; socket events write straight into its cache
 (`features/realtime/hooks/use-realtime-events.ts`); UI/ephemeral state in zustand.
-
-`apps/frontend1` is the same app with a different look.
