@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Optional,
   Patch,
   Post,
   Query,
@@ -32,12 +33,17 @@ import { AddMembersDto } from './dto/add-members.dto.js';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
 import { UpdateRoomPreferenceDto } from './dto/update-room-preference.dto.js';
 import { MarkReadDto } from './dto/mark-read.dto.js';
+import { WS_SERVER_EVENTS } from '../chat/chat.events.js';
+import {
+  neutralizeRoomViewer,
+  RealtimeEmitter,
+} from '../realtime/realtime-emitter.service.js';
 import type {
   MarkReadResponse,
   RoomDetailResponse,
   RoomMemberResponse,
   RoomPageResponse,
-  RoomPreferenceResponse,
+  RoomPreferenceUpdateResponse,
 } from './dto/room.response.js';
 import {
   AuthGuard,
@@ -52,7 +58,10 @@ import {
 
 
 export class RoomsController {
-  constructor(private readonly roomsService: RoomsService) {}
+  constructor(
+    private readonly roomsService: RoomsService,
+    @Optional() private readonly realtime?: RealtimeEmitter,
+  ) {}
 
   /**
    * Creates a new group conversation room.
@@ -72,6 +81,7 @@ export class RoomsController {
    */
   @ApiOperation({ summary: 'Create or get direct 1-on-1 chat room' })
   @Post('direct')
+  @HttpCode(HttpStatus.OK)
   async createDirectRoom(
     @CurrentUser('id') userId: string,
     @Body() dto: CreateDirectRoomDto,
@@ -115,7 +125,10 @@ export class RoomsController {
     @Param() params: RoomIdParamDto,
     @Body() dto: UpdateRoomDto,
   ): Promise<RoomDetailResponse> {
-    return this.roomsService.updateRoom(userId, params.roomId, dto);
+    const room = await this.roomsService.updateRoom(userId, params.roomId, dto);
+    // Room-wide payload: drop the caller's personal unread count / preferences.
+    this.realtime?.toRoom(params.roomId, WS_SERVER_EVENTS.ROOM_UPDATED, neutralizeRoomViewer(room));
+    return room;
   }
 
   /**
@@ -151,12 +164,20 @@ export class RoomsController {
   @ApiOperation({ summary: 'Add members to a group room' })
   @UseGuards(RoomAdminGuard)
   @Post(':roomId/members')
+  @HttpCode(HttpStatus.OK)
   async addMembers(
     @CurrentUser('id') userId: string,
     @Param() params: RoomIdParamDto,
     @Body() dto: AddMembersDto,
   ): Promise<RoomMemberResponse[]> {
-    return this.roomsService.addMembers(userId, params.roomId, dto);
+    const added = await this.roomsService.addMembers(userId, params.roomId, dto);
+    for (const member of added) {
+      this.realtime?.toRoom(params.roomId, WS_SERVER_EVENTS.MEMBER_JOINED, {
+        roomId: params.roomId,
+        userId: member.user.id,
+      });
+    }
+    return added;
   }
 
   /**
@@ -189,11 +210,8 @@ export class RoomsController {
     @CurrentUser('id') userId: string,
     @Param() params: RoomMemberParamDto,
   ): Promise<void> {
-    return this.roomsService.removeMember(
-      userId,
-      params.roomId,
-      params.userId,
-    );
+    await this.roomsService.removeMember(userId, params.roomId, params.userId);
+    await this.announceMemberLeft(params.roomId, params.userId);
   }
 
   /**
@@ -207,7 +225,17 @@ export class RoomsController {
     @CurrentUser('id') userId: string,
     @Param() params: RoomIdParamDto,
   ): Promise<void> {
-    return this.roomsService.leaveRoom(userId, params.roomId);
+    await this.roomsService.leaveRoom(userId, params.roomId);
+    await this.announceMemberLeft(params.roomId, userId);
+  }
+
+  /**
+   * Tells the room a member is gone, then unsubscribes that user's live sockets so they
+   * stop receiving the room's broadcasts.
+   */
+  private async announceMemberLeft(roomId: string, userId: string): Promise<void> {
+    this.realtime?.toRoom(roomId, WS_SERVER_EVENTS.MEMBER_LEFT, { roomId, userId });
+    await this.realtime?.evictUser(roomId, userId);
   }
 
   /**
@@ -220,7 +248,7 @@ export class RoomsController {
     @CurrentUser('id') userId: string,
     @Param() params: RoomIdParamDto,
     @Body() dto: UpdateRoomPreferenceDto,
-  ): Promise<RoomPreferenceResponse> {
+  ): Promise<RoomPreferenceUpdateResponse> {
     return this.roomsService.updatePreferences(
       userId,
       params.roomId,
@@ -234,6 +262,7 @@ export class RoomsController {
   @ApiOperation({ summary: 'Mark room read up to a message' })
   @UseGuards(RoomMemberGuard)
   @Post(':roomId/read')
+  @HttpCode(HttpStatus.OK)
   async markRead(
     @CurrentUser('id') userId: string,
     @Param() params: RoomIdParamDto,

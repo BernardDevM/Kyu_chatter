@@ -9,18 +9,16 @@ export interface UserSummaryResponse {
 }
 
 /**
- * Public profile of a user with online and activity indicators.
+ * Public profile of a user (`GET /api/users/:id`, docs/API.md §4.4).
+ * Live online status is served by `/api/presence`, not here.
  */
 export interface UserProfileResponse extends UserSummaryResponse {
-  lastSeenAt: string | null;
-  isOnline: boolean;
+  createdAt: string;
 }
 
 /**
- * Full private profile of the currently authenticated user.
+ * Full private profile of the authenticated user (`/api/users/me`, docs/API.md §4.1).
  */
 export interface MeResponse extends UserProfileResponse {
   email: string;
-  emailVerified: boolean;
-  createdAt: string;
 }

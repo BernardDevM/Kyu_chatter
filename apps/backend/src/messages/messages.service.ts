@@ -3,9 +3,12 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { MemberRole } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { getNodeId } from '../common/utils/node-id.js';
+import { toMediaResponse } from '../media/media.mapper.js';
 import type {
   MessagePageResponse,
   MessageResponse,
@@ -18,19 +21,35 @@ import type { SendMessageDto } from './dto/send-message.dto.js';
 import type { EditMessageDto } from './dto/edit-message.dto.js';
 import type { AddReactionDto } from './dto/add-reaction.dto.js';
 import type { RemoveReactionQueryDto } from './dto/remove-reaction-query.dto.js';
+import { WS_SERVER_EVENTS } from '../chat/chat.events.js';
+import {
+  neutralizeReactionViewer,
+  RealtimeEmitter,
+} from '../realtime/realtime-emitter.service.js';
+
+/** Relations loaded for every message so it can be mapped to `MessageResponse`. */
+const MESSAGE_INCLUDE = {
+  sender: { select: { id: true, name: true, image: true } },
+  attachments: { include: { media: true } },
+  reactions: true,
+} as const;
 
 @Injectable()
 export class MessagesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly realtime?: RealtimeEmitter,
+  ) {}
 
   /**
    * Resynchronizes missed messages in chronological order (oldest first) after client reconnection.
+   * When `hasMore` is true, `nextCursor` is the id to pass as `afterId` for the next page.
    */
   async syncMessages(
     userId: string,
     roomId: string,
     query: SyncMessagesQueryDto,
-  ): Promise<MessageResponse[]> {
+  ): Promise<MessagePageResponse> {
     const member = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId } },
     });
@@ -48,37 +67,33 @@ export class MessagesService {
       );
     }
 
-    const limit = query.limit ?? 100;
+    const limit = query.limit ?? 50;
     const messages = await this.prisma.message.findMany({
       where: {
         roomId,
         createdAt: { gt: anchor.createdAt },
       },
-      take: limit,
+      take: limit + 1,
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replyTo: {
-          select: {
-            id: true,
-            body: true,
-            sender: { select: { name: true } },
-          },
-        },
-        attachments: {
-          include: {
-            media: true,
-          },
-        },
-        reactions: true,
-      },
+      include: MESSAGE_INCLUDE,
     });
 
-    return messages.map((m) => this.mapMessageToResponse(m, userId));
+    const hasMore = messages.length > limit;
+    const items = (hasMore ? messages.slice(0, limit) : messages).map((m) =>
+      this.mapMessageToResponse(m, userId),
+    );
+
+    return {
+      items,
+      nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
+      hasMore,
+    };
   }
 
   /**
-   * Retrieves message history for a room, newest first with cursor pagination.
+   * Retrieves message history for a room with cursor pagination.
+   * `direction=before` (default) pages towards older messages, newest first;
+   * `direction=after` pages towards newer messages, oldest first.
    */
   async listMessages(
     userId: string,
@@ -93,28 +108,14 @@ export class MessagesService {
     }
 
     const limit = query.limit ?? 30;
+    const order = query.direction === 'after' ? 'asc' : 'desc';
     const messages = await this.prisma.message.findMany({
       where: { roomId },
       take: limit + 1,
       cursor: query.cursor ? { id: query.cursor } : undefined,
       skip: query.cursor ? 1 : 0,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replyTo: {
-          select: {
-            id: true,
-            body: true,
-            sender: { select: { name: true } },
-          },
-        },
-        attachments: {
-          include: {
-            media: true,
-          },
-        },
-        reactions: true,
-      },
+      orderBy: [{ createdAt: order }, { id: order }],
+      include: MESSAGE_INCLUDE,
     });
 
     const hasMore = messages.length > limit;
@@ -153,22 +154,7 @@ export class MessagesService {
           clientMessageId: dto.clientMessageId,
         },
       },
-      include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replyTo: {
-          select: {
-            id: true,
-            body: true,
-            sender: { select: { name: true } },
-          },
-        },
-        attachments: {
-          include: {
-            media: true,
-          },
-        },
-        reactions: true,
-      },
+      include: MESSAGE_INCLUDE,
     });
     if (existing) {
       return this.mapMessageToResponse(existing, userId);
@@ -209,22 +195,7 @@ export class MessagesService {
             }
           : undefined,
       },
-      include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replyTo: {
-          select: {
-            id: true,
-            body: true,
-            sender: { select: { name: true } },
-          },
-        },
-        attachments: {
-          include: {
-            media: true,
-          },
-        },
-        reactions: true,
-      },
+      include: MESSAGE_INCLUDE,
     });
 
     await this.prisma.room.update({
@@ -262,39 +233,42 @@ export class MessagesService {
         body: dto.body,
         editedAt: new Date(),
       },
-      include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replyTo: {
-          select: {
-            id: true,
-            body: true,
-            sender: { select: { name: true } },
-          },
-        },
-        attachments: {
-          include: {
-            media: true,
-          },
-        },
-        reactions: true,
-      },
+      include: MESSAGE_INCLUDE,
     });
 
-    return this.mapMessageToResponse(updated, userId);
+    const response = this.mapMessageToResponse(updated, userId);
+    this.realtime?.toRoom(
+      response.roomId,
+      WS_SERVER_EVENTS.MESSAGE_UPDATED,
+      neutralizeReactionViewer(response),
+    );
+    return response;
   }
 
   /**
-   * Soft-deletes a message sent by the caller.
+   * Soft-deletes a message. Allowed for the author or a room ADMIN/OWNER.
    */
   async deleteMessage(userId: string, messageId: string): Promise<void> {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
+      select: { id: true, roomId: true, senderId: true },
     });
     if (!message) {
       throw new NotFoundException(`Message with ID ${messageId} not found`);
     }
+
     if (message.senderId !== userId) {
-      throw new ForbiddenException('You can only delete your own messages');
+      const member = await this.prisma.roomMember.findUnique({
+        where: { roomId_userId: { roomId: message.roomId, userId } },
+        select: { role: true },
+      });
+      const isModerator =
+        member?.role === MemberRole.OWNER || member?.role === MemberRole.ADMIN;
+      if (!isModerator) {
+        throw new ForbiddenException(
+          'Only the author or a room admin can delete this message',
+        );
+      }
     }
 
     await this.prisma.message.update({
@@ -303,6 +277,11 @@ export class MessagesService {
         deletedAt: new Date(),
         body: null,
       },
+    });
+
+    this.realtime?.toRoom(message.roomId, WS_SERVER_EVENTS.MESSAGE_DELETED, {
+      messageId,
+      roomId: message.roomId,
     });
   }
 
@@ -344,7 +323,13 @@ export class MessagesService {
       },
     });
 
-    return this.aggregateReactions(messageId, userId);
+    const reactions = await this.aggregateReactions(messageId, userId);
+    // Room-wide payload: `hasReacted` is per-viewer, so clients derive it from `userIds`.
+    this.realtime?.toRoom(message.roomId, WS_SERVER_EVENTS.REACTION_UPDATED, {
+      messageId,
+      reactions: neutralizeReactionViewer({ reactions }).reactions,
+    });
+    return reactions;
   }
 
   /**
@@ -377,7 +362,13 @@ export class MessagesService {
       },
     });
 
-    return this.aggregateReactions(messageId, userId);
+    const reactions = await this.aggregateReactions(messageId, userId);
+    // Room-wide payload: `hasReacted` is per-viewer, so clients derive it from `userIds`.
+    this.realtime?.toRoom(message.roomId, WS_SERVER_EVENTS.REACTION_UPDATED, {
+      messageId,
+      reactions: neutralizeReactionViewer({ reactions }).reactions,
+    });
+    return reactions;
   }
 
   /**
@@ -404,19 +395,19 @@ export class MessagesService {
     const receipts = await this.prisma.messageReceipt.findMany({
       where: { messageId },
       select: {
+        messageId: true,
         userId: true,
         status: true,
-        deliveredAt: true,
-        readAt: true,
+        updatedAt: true,
       },
       orderBy: { createdAt: 'asc' },
     });
 
     return receipts.map((r) => ({
+      messageId: r.messageId,
       userId: r.userId,
       status: r.status,
-      deliveredAt: r.deliveredAt ? r.deliveredAt.toISOString() : null,
-      readAt: r.readAt ? r.readAt.toISOString() : null,
+      updatedAt: r.updatedAt.toISOString(),
     }));
   }
 
@@ -431,100 +422,57 @@ export class MessagesService {
     const reactions = await this.prisma.messageReaction.findMany({
       where: { messageId },
       select: { emoji: true, userId: true },
+      orderBy: { createdAt: 'asc' },
     });
-
-    const summaryMap = new Map<
-      string,
-      { count: number; reactedByMe: boolean }
-    >();
-    for (const r of reactions) {
-      const existing = summaryMap.get(r.emoji) ?? {
-        count: 0,
-        reactedByMe: false,
-      };
-      existing.count += 1;
-      if (r.userId === currentUserId) {
-        existing.reactedByMe = true;
-      }
-      summaryMap.set(r.emoji, existing);
-    }
-
-    return Array.from(summaryMap.entries()).map(([emoji, val]) => ({
-      emoji,
-      count: val.count,
-      reactedByMe: val.reactedByMe,
-    }));
+    return summarizeReactions(reactions, currentUserId);
   }
 
   private mapMessageToResponse(
     msg: any,
     currentUserId: string,
   ): MessageResponse {
-    const reactionMap = new Map<
-      string,
-      { count: number; reactedByMe: boolean; userIds: string[] }
-    >();
-    for (const r of msg.reactions ?? []) {
-      const existing = reactionMap.get(r.emoji) ?? {
-        count: 0,
-        reactedByMe: false,
-        userIds: [],
-      };
-      existing.count += 1;
-      existing.userIds.push(r.userId);
-      if (r.userId === currentUserId) {
-        existing.reactedByMe = true;
-      }
-      reactionMap.set(r.emoji, existing);
-    }
-    const reactions = Array.from(reactionMap.entries()).map(([emoji, val]) => ({
-      emoji,
-      count: val.count,
-      reactedByMe: val.reactedByMe,
-      hasReacted: val.reactedByMe,
-      userIds: val.userIds,
-    }));
-
     return {
       id: msg.id,
       roomId: msg.roomId,
       senderId: msg.senderId ?? msg.sender?.id,
+      clientMessageId: msg.clientMessageId,
+      body: msg.body,
+      replyToId: msg.replyToId ?? null,
+      nodeId: msg.nodeId,
+      createdAt: msg.createdAt.toISOString(),
+      editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null,
       sender: {
         id: msg.sender.id,
         name: msg.sender.name,
         image: msg.sender.image,
       },
-      clientMessageId: msg.clientMessageId,
-      body: msg.body,
-      replyToId: msg.replyToId ?? (msg.replyTo ? msg.replyTo.id : null),
-      replyTo: msg.replyTo
-        ? {
-            id: msg.replyTo.id,
-            body: msg.replyTo.body,
-            senderName: msg.replyTo.sender?.name ?? 'Unknown',
-          }
-        : null,
-      attachments: (msg.attachments ?? []).map((att: any) => ({
-        id: att.id,
-        media: {
-          id: att.media.id,
-          kind: att.media.kind,
-          status: att.media.status,
-          url: att.media.url,
-          originalName: att.media.originalName,
-          mimeType: att.media.mimeType,
-          bytes: Number(att.media.bytes),
-          width: att.media.width,
-          height: att.media.height,
-          duration: att.media.duration,
-          createdAt: att.media.createdAt.toISOString(),
-        },
-      })),
-      reactions,
-      nodeId: msg.nodeId,
-      createdAt: msg.createdAt.toISOString(),
-      editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
-      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null,
+      attachments: (msg.attachments ?? []).map((att: any) =>
+        toMediaResponse(att.media),
+      ),
+      reactions: summarizeReactions(msg.reactions ?? [], currentUserId),
     };
   }
+}
+
+/**
+ * Groups raw reaction rows by emoji into the public summary shape, in
+ * first-reacted order. `hasReacted` is computed for `currentUserId`.
+ */
+export function summarizeReactions(
+  reactions: ReadonlyArray<{ emoji: string; userId: string }>,
+  currentUserId: string,
+): ReactionSummaryResponse[] {
+  const byEmoji = new Map<string, string[]>();
+  for (const r of reactions) {
+    const userIds = byEmoji.get(r.emoji) ?? [];
+    userIds.push(r.userId);
+    byEmoji.set(r.emoji, userIds);
+  }
+  return Array.from(byEmoji.entries()).map(([emoji, userIds]) => ({
+    emoji,
+    count: userIds.length,
+    hasReacted: userIds.includes(currentUserId),
+    userIds,
+  }));
 }

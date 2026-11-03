@@ -8,7 +8,10 @@ import {
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { PresenceQueryDto } from './dto/presence-query.dto.js';
 import { PresenceService } from './presence.service.js';
-import type { PresenceResponse } from './dto/presence.response.js';
+import {
+  toPresenceResponse,
+  type PresenceResponse,
+} from './dto/presence.response.js';
 
 @ApiTags('Presence')
 @ApiBearerAuth('session-auth')
@@ -26,6 +29,10 @@ export class PresenceController {
     @CurrentUser('id') userId: string,
     @Query() query: PresenceQueryDto,
   ): Promise<PresenceResponse> {
-    return this.presenceService.getPresence(userId, query.userIds);
+    const snapshot = await this.presenceService.getPresence(
+      userId,
+      query.userIds,
+    );
+    return toPresenceResponse(snapshot);
   }
 }

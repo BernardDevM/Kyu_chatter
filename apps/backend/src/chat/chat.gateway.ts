@@ -1,9 +1,10 @@
-import { Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, Optional, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -16,6 +17,7 @@ import { PresenceService } from './presence.service.js';
 import { TypingService } from './typing.service.js';
 import { MessagesService } from '../messages/messages.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { RealtimeEmitter } from '../realtime/realtime-emitter.service.js';
 import { ReceiptStatus } from '../generated/prisma/enums.js';
 import { JoinRoomWsDto } from './dto/ws/join-room.ws-dto.js';
 import { LeaveRoomWsDto } from './dto/ws/leave-room.ws-dto.js';
@@ -48,7 +50,9 @@ export interface WsAckError {
     transform: true,
   }),
 )
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server!: Server;
 
@@ -59,7 +63,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly typingService: TypingService,
     private readonly messagesService: MessagesService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly realtimeEmitter?: RealtimeEmitter,
   ) {}
+
+  /**
+   * Gives REST services a handle on the Socket.IO server so they can broadcast events.
+   */
+  afterInit(server: Server): void {
+    this.realtimeEmitter?.attach(server);
+  }
 
   /**
    * Connection hook - verifies authentication, rejects invalid sockets,
@@ -227,7 +239,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SendMessageWsDto,
-  ): Promise<{ ok: true; data: unknown } | WsAckError> {
+  ): Promise<{ ok: true; roomId: string; data: unknown } | WsAckError> {
     const user = (client.data as { user?: SocketUser })?.user;
     if (!user?.id) {
       return {
@@ -252,7 +264,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(
         `Broadcast message ${payload.clientMessageId} to room ${payload.roomId} across cluster`,
       );
-      return { ok: true, data: message };
+      return { ok: true, roomId: payload.roomId, data: message };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Failed to send message: ${errMsg}`);
@@ -431,13 +443,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const rooms = await Promise.all(
       payload.rooms.map(async (r) => {
         try {
-          if (r.lastSeenMessageId) {
-            const messages = await this.messagesService.syncMessages(
+          if (r.lastMessageId) {
+            const page = await this.messagesService.syncMessages(
               user.id,
               r.roomId,
-              { afterId: r.lastSeenMessageId },
+              { afterId: r.lastMessageId },
             );
-            return { roomId: r.roomId, messages };
+            return { roomId: r.roomId, messages: page.items };
           }
           const page = await this.messagesService.listMessages(
             user.id,

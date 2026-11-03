@@ -1,11 +1,28 @@
 import type { MemberRole, RoomType } from '../../generated/prisma/enums.js';
 import type { UserSummaryResponse } from '../../users/dto/user.response.js';
-import type { MessageResponse } from '../../messages/dto/message.response.js';
 
 export interface RoomPreferenceResponse {
   isMuted: boolean;
   isArchived: boolean;
   isPinned: boolean;
+}
+
+/**
+ * Result of `PATCH /api/rooms/:roomId/preferences` (docs/API.md §6.12).
+ */
+export interface RoomPreferenceUpdateResponse extends RoomPreferenceResponse {
+  roomId: string;
+  userId: string;
+}
+
+/**
+ * Compact preview of the newest message in a room.
+ */
+export interface RoomLastMessageResponse {
+  id: string;
+  senderId: string;
+  body: string | null;
+  createdAt: string;
 }
 
 export interface RoomSummaryResponse {
@@ -15,11 +32,9 @@ export interface RoomSummaryResponse {
   description: string | null;
   image: string | null;
   memberCount: number;
-  lastMessage: MessageResponse | null;
+  lastMessage: RoomLastMessageResponse | null;
   unreadCount: number;
   preference: RoomPreferenceResponse;
-  preferences?: RoomPreferenceResponse;
-  otherUser?: UserSummaryResponse;
   updatedAt: string;
 }
 
@@ -29,23 +44,21 @@ export interface RoomPageResponse {
   hasMore: boolean;
 }
 
-export interface RoomDetailResponse extends RoomSummaryResponse {
-  directKey: string | null;
-  createdById: string;
-  createdAt: string;
-  myRole: MemberRole;
-  memberCount: number;
-}
-
 export interface RoomMemberResponse {
-  user: UserSummaryResponse;
+  roomId: string;
+  userId: string;
   role: MemberRole;
   joinedAt: string;
-  isOnline: boolean;
+  user: UserSummaryResponse;
+}
+
+export interface RoomDetailResponse extends RoomSummaryResponse {
+  members: RoomMemberResponse[];
 }
 
 export interface MarkReadResponse {
   roomId: string;
+  userId: string;
   lastReadMessageId: string;
-  unreadCount: number;
+  readAt: string;
 }
