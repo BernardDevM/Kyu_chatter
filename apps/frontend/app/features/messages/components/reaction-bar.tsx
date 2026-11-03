@@ -41,10 +41,20 @@ export function ReactionBar({
   );
 }
 
-export function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
+export function ReactionPicker({
+  onPick,
+  onOpenChange,
+}: {
+  onPick: (emoji: string) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="size-7" aria-label="Add reaction">
           <SmilePlus />
@@ -58,7 +68,7 @@ export function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) 
             className="hover:bg-accent rounded-md p-1.5 text-lg"
             onClick={() => {
               onPick(e);
-              setOpen(false);
+              changeOpen(false);
             }}
           >
             {e}

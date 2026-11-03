@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { AlertCircle, CornerUpLeft, Loader2, Pencil, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/features/users/components/user-avatar";
@@ -32,6 +33,7 @@ export function MessageItem({
   onRetry,
 }: Props) {
   const { setReplyTo, setEditing } = useComposerStore();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const deleted = !!m.deletedAt;
   const time = format(new Date(m.createdAt), "HH:mm");
 
@@ -120,8 +122,8 @@ export function MessageItem({
       </div>
 
       {!deleted && !m.pending && !m.failed && (
-        <div className="bg-popover mb-1 hidden items-center rounded-full border p-0.5 shadow-sm group-hover:flex">
-          <ReactionPicker onPick={(e) => onReact(e, false)} />
+        <div className={cn("bg-popover mb-1 hidden items-center rounded-full border p-0.5 shadow-sm group-hover:flex", pickerOpen && "flex")}>
+          <ReactionPicker onPick={(e) => onReact(e, false)} onOpenChange={setPickerOpen} />
           <Button variant="ghost" size="icon" className="size-7 rounded-full" aria-label="Reply" onClick={() => setReplyTo(m.roomId, m)}>
             <CornerUpLeft />
           </Button>
