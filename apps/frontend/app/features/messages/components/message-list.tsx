@@ -88,7 +88,7 @@ export function MessageList({
     );
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto pt-2 pb-2">
+    <div ref={scroller} className="dot-grid min-h-0 flex-1 overflow-y-auto pt-2 pb-2">
       {query.hasNextPage && (
         <div className="flex justify-center py-2">
           <Button
@@ -114,8 +114,8 @@ export function MessageList({
           {startsDay && (
             <div className="my-3 flex items-center gap-3 px-4">
               <div className="bg-border h-px flex-1" />
-              <span className="text-muted-foreground text-xs font-medium">
-                {format(new Date(message.createdAt), "EEEE, MMM d")}
+              <span className="text-muted-foreground font-mono text-[11px] tracking-wide uppercase">
+                {format(new Date(message.createdAt), "EEE, MMM d")}
               </span>
               <div className="bg-border h-px flex-1" />
             </div>

@@ -62,7 +62,7 @@ export function MessageItem({
           className={cn(
             "relative rounded-3xl px-4 py-2 text-sm",
             isMine
-              ? "bg-primary text-primary-foreground rounded-br-md"
+              ? "bg-signal text-signal-foreground rounded-br-md"
               : "bg-muted text-foreground rounded-bl-md",
             deleted && "bg-transparent text-muted-foreground border border-dashed italic",
           )}
@@ -71,7 +71,7 @@ export function MessageItem({
             <div
               className={cn(
                 "mb-1.5 flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs",
-                isMine ? "bg-primary-foreground/15" : "bg-background/70",
+                isMine ? "bg-signal-foreground/10" : "bg-background/70",
               )}
             >
               <CornerUpLeft className="size-3 shrink-0" />
@@ -93,8 +93,8 @@ export function MessageItem({
               <MessageAttachments items={m.attachments} />
               <span
                 className={cn(
-                  "mt-0.5 flex items-center justify-end gap-1 text-[10px]",
-                  isMine ? "text-primary-foreground/70" : "text-muted-foreground",
+                  "mt-0.5 flex items-center justify-end gap-1 font-mono text-[10px]",
+                  isMine ? "text-signal-foreground/60" : "text-muted-foreground",
                 )}
               >
                 {m.editedAt && "edited ·"} {time}

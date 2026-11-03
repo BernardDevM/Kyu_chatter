@@ -35,18 +35,18 @@ export function RoomList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="space-y-2 px-3 pb-2">
+      <div className="space-y-2.5 px-4 pb-3">
         <div className="relative">
           <Search className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
           <Input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Filter chats"
+            placeholder="Search chats"
             className="h-9 pl-8"
           />
         </div>
         <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-          <TabsList className="grid h-8 w-full grid-cols-4">
+          <TabsList className="grid h-9 w-full grid-cols-4">
             <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
             <TabsTrigger value="DIRECT" className="text-xs">DMs</TabsTrigger>
             <TabsTrigger value="GROUP" className="text-xs">Groups</TabsTrigger>
@@ -57,10 +57,10 @@ export function RoomList() {
         </Tabs>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-0.5 px-2 pb-2">
+        <div className="space-y-0.5 px-2.5 pb-3">
           {isPending ? (
             Array.from({ length: 6 }, (_, i) => (
-              <Skeleton key={i} className="h-14 w-full rounded-lg" />
+              <Skeleton key={i} className="h-[3.75rem] w-full rounded-lg" />
             ))
           ) : rooms.length === 0 ? (
             <EmptyState

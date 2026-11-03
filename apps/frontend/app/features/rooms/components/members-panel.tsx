@@ -40,7 +40,7 @@ export function MembersPanel({ room }: { room: RoomDetail }) {
   return (
     <aside className="bg-sidebar flex h-full w-72 shrink-0 flex-col border-l">
       <div className="space-y-1 border-b p-4">
-        <h2 className="truncate font-semibold">{room.name ?? "Members"}</h2>
+        <h2 className="font-display truncate text-lg font-bold">{room.name ?? "Members"}</h2>
         {room.description && (
           <p className="text-muted-foreground text-sm">{room.description}</p>
         )}

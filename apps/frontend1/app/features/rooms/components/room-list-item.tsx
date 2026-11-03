@@ -30,7 +30,7 @@ export function RoomListItem({ room }: { room: Room }) {
         cn(
           "flex items-center gap-3.5 rounded-2xl px-3 py-3 transition-colors",
           isActive
-            ? "bg-accent text-accent-foreground shadow-sm"
+            ? "bg-accent text-accent-foreground"
             : "hover:bg-muted",
         )
       }
@@ -52,7 +52,7 @@ export function RoomListItem({ room }: { room: Room }) {
           {preference?.isMuted && (
             <BellOff className="text-muted-foreground size-3 shrink-0" />
           )}
-          <span className="text-muted-foreground ml-auto shrink-0 text-[11px]">
+          <span className="text-muted-foreground ml-auto shrink-0 font-mono text-[10px]">
             {formatRoomTime(room.lastMessage?.createdAt ?? room.updatedAt)}
           </span>
         </div>
@@ -68,7 +68,7 @@ export function RoomListItem({ room }: { room: Room }) {
               : "No messages yet"}
           </p>
           {unread && !preference?.isMuted && (
-            <Badge className="ml-auto h-5 min-w-5 rounded-full px-1.5 text-[11px]">
+            <Badge className="bg-signal text-signal-foreground ml-auto h-5 min-w-5 rounded-full border-0 px-1.5 font-mono text-[11px] font-medium">
               {room.unreadCount > 99 ? "99+" : room.unreadCount}
             </Badge>
           )}

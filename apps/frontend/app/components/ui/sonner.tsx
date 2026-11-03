@@ -16,6 +16,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-border": "var(--border)",
         } as React.CSSProperties
       }
+      toastOptions={{
+        classNames: {
+          toast: "!rounded-lg !font-sans !shadow-lg",
+          title: "!font-semibold",
+        },
+      }}
       {...props}
     />
   );

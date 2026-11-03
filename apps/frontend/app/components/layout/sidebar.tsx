@@ -1,7 +1,7 @@
-import { MessagesSquare, SquarePen } from "lucide-react";
+import { SquarePen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { siteConfig } from "@/config/site";
+import { KyuMark } from "@/components/brand/kyu-mark";
 import { ConnectionBadge } from "@/features/realtime/components/connection-badge";
 import { RoomList } from "@/features/rooms/components/room-list";
 import { useNewChatStore } from "@/features/rooms/stores/new-chat-store";
@@ -12,16 +12,13 @@ export function Sidebar() {
   const onOpen = useNewChatStore((s) => s.onOpen);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2.5 p-3">
-        <div className="bg-primary text-primary-foreground flex size-9 items-center justify-center rounded-xl">
-          <MessagesSquare className="size-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{siteConfig.name}</p>
+      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+        <KyuMark className="text-primary size-7 shrink-0" />
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="font-display truncate text-xl font-bold tracking-tight">kyu</p>
           <ConnectionBadge />
         </div>
         <Button
-          variant="secondary"
           size="icon"
           aria-label="New chat"
           onClick={() => onOpen()}

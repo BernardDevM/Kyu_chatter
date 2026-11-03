@@ -3,9 +3,9 @@ import { cn } from "@/lib/utils";
 import { useConnectionStore } from "../stores/connection-store";
 
 const LABEL = {
-  connected: "Live",
-  connecting: "Connecting…",
-  disconnected: "Offline",
+  connected: "live",
+  connecting: "connecting",
+  disconnected: "offline",
 } as const;
 
 /** `compact` renders just the status dot (used in the narrow rail). */
@@ -13,7 +13,7 @@ export function ConnectionBadge({ compact = false }: { compact?: boolean }) {
   const status = useConnectionStore((s) => s.status);
   return (
     <span
-      className="text-muted-foreground flex items-center gap-1.5 text-xs"
+      className="flex items-center gap-1.5 font-mono text-[11px]"
       title={`Realtime: ${LABEL[status]}`}
     >
       <span
