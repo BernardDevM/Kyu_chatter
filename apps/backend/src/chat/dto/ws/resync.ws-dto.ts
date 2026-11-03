@@ -16,10 +16,10 @@ export class RoomResyncItemDto {
   @IsUUID('all')
   roomId!: string;
 
-  /** Optional last seen message UUID in this room */
+  /** Optional last received message UUID in this room */
   @IsOptional()
   @IsUUID('all')
-  lastSeenMessageId?: string;
+  lastMessageId?: string;
 }
 
 /**

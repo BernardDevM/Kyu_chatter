@@ -8,4 +8,4 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  * Allows images, videos, audio, and PDF documents.
  */
 export const ALLOWED_MIME_TYPES_REGEX =
-  /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime)|audio\/(mpeg|wav|ogg)|application\/pdf)$/;
+  /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime)|audio\/(mpeg|wav|ogg|webm)|application\/pdf)$/;

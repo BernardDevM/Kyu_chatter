@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PresenceService } from '../chat/presence.service.js';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -12,9 +11,6 @@ describe('UsersService', () => {
       update: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
     };
-  };
-  let presenceMock: {
-    getPresence: ReturnType<typeof vi.fn>;
   };
 
   const sampleDate = new Date('2026-01-01T00:00:00.000Z');
@@ -38,19 +34,10 @@ describe('UsersService', () => {
       },
     };
 
-    presenceMock = {
-      getPresence: vi.fn().mockResolvedValue({
-        presence: {
-          user_1: { online: true, lastSeenAt: null },
-        },
-      }),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: prismaMock },
-        { provide: PresenceService, useValue: presenceMock },
       ],
     }).compile();
 
@@ -62,7 +49,7 @@ describe('UsersService', () => {
   });
 
   describe('getMe', () => {
-    it('returns user profile and presence when user exists', async () => {
+    it('returns the private profile in API shape when user exists', async () => {
       prismaMock.user.findUnique.mockResolvedValue(sampleUser);
 
       const result = await service.getMe('user_1');
@@ -72,12 +59,9 @@ describe('UsersService', () => {
       });
       expect(result).toEqual({
         id: 'user_1',
-        name: 'Alice Wonder',
         email: 'alice@example.com',
-        emailVerified: true,
+        name: 'Alice Wonder',
         image: 'https://example.com/alice.png',
-        lastSeenAt: sampleDate.toISOString(),
-        isOnline: true,
         createdAt: sampleDate.toISOString(),
       });
     });
@@ -158,27 +142,21 @@ describe('UsersService', () => {
   });
 
   describe('getUserProfile', () => {
-    it('returns target user public profile and presence status', async () => {
+    it('returns the target user public profile in API shape', async () => {
       prismaMock.user.findUnique.mockResolvedValue({
         id: 'user_2',
         name: 'Bob',
         image: null,
-        lastSeenAt: sampleDate,
-      });
-      presenceMock.getPresence.mockResolvedValue({
-        presence: {
-          user_2: { online: false, lastSeenAt: sampleDate.toISOString() },
-        },
+        createdAt: sampleDate,
       });
 
-      const result = await service.getUserProfile('user_1', 'user_2');
+      const result = await service.getUserProfile('user_2');
 
       expect(result).toEqual({
         id: 'user_2',
         name: 'Bob',
         image: null,
-        lastSeenAt: sampleDate.toISOString(),
-        isOnline: false,
+        createdAt: sampleDate.toISOString(),
       });
     });
 
@@ -186,7 +164,7 @@ describe('UsersService', () => {
       prismaMock.user.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.getUserProfile('user_1', 'unknown_user'),
+        service.getUserProfile('unknown_user'),
       ).rejects.toThrow(NotFoundException);
     });
   });

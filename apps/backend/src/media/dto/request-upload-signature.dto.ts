@@ -3,9 +3,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
-  IsOptional,
   IsString,
-  IsUUID,
   Length,
   Matches,
   Max,
@@ -27,7 +25,7 @@ export class RequestUploadSignatureDto {
   @IsNotEmpty()
   @Length(1, 255)
   @Transform(trimString)
-  originalName!: string;
+  filename!: string;
 
   /** MIME type verified against the allowable media allow-list */
   @IsString()
@@ -49,9 +47,4 @@ export class RequestUploadSignatureDto {
   /** Logical kind of media attachment */
   @IsEnum(AttachmentKind)
   kind!: AttachmentKind;
-
-  /** Optional room UUID the upload will be associated with */
-  @IsOptional()
-  @IsUUID('all')
-  roomId?: string;
 }

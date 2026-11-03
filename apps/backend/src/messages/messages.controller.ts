@@ -66,6 +66,7 @@ export class MessagesController {
    */
   @ApiOperation({ summary: 'Add emoji reaction to message' })
   @Post(':messageId/reactions')
+  @HttpCode(HttpStatus.OK)
   async addReaction(
     @CurrentUser('id') userId: string,
     @Param() params: MessageIdParamDto,

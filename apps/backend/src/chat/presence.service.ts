@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RedisService } from '../realtime/redis.service.js';
-import type { PresenceResponse, UserPresence } from './dto/presence.response.js';
+import type { PresenceSnapshot, UserPresence } from './dto/presence.response.js';
 
 @Injectable()
 export class PresenceService {
@@ -95,7 +95,7 @@ export class PresenceService {
   async getPresence(
     userId: string,
     targetUserIds: string[],
-  ): Promise<PresenceResponse> {
+  ): Promise<PresenceSnapshot> {
     const presence: Record<string, UserPresence> = {};
     if (!targetUserIds.length) {
       return { presence };

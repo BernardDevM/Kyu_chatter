@@ -36,6 +36,7 @@ export class MediaController {
    */
   @ApiOperation({ summary: 'Request presigned direct upload signature' })
   @Post('signature')
+  @HttpCode(HttpStatus.OK)
   async requestSignature(
     @CurrentUser('id') userId: string,
     @Body() dto: RequestUploadSignatureDto,
@@ -47,13 +48,13 @@ export class MediaController {
    * Confirms a finished direct upload to Cloudinary and marks the media record READY.
    */
   @ApiOperation({ summary: 'Confirm completed upload' })
-  @Post(':mediaId/confirm')
+  @Post('confirm')
+  @HttpCode(HttpStatus.OK)
   async confirmUpload(
     @CurrentUser('id') userId: string,
-    @Param() params: MediaIdParamDto,
     @Body() dto: ConfirmUploadDto,
   ): Promise<MediaResponse> {
-    return this.mediaService.confirmUpload(userId, params.mediaId, dto);
+    return this.mediaService.confirmUpload(userId, dto);
   }
 
   /**

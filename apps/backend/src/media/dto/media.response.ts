@@ -1,16 +1,16 @@
 import type { AttachmentKind, MediaStatus } from '../../generated/prisma/enums.js';
 
 /**
- * Public metadata for an uploaded media asset.
- * Bytes is serialized as a number (converted from BigInt).
+ * Public metadata for an uploaded media asset (docs/API.md §7.2).
+ * `bytes` is serialized as a number. The same flat shape is embedded in
+ * `MessageResponse.attachments`.
  */
 export interface MediaResponse {
   id: string;
+  storageKey: string;
+  url: string | null;
   kind: AttachmentKind;
   status: MediaStatus;
-  url: string | null;
-  originalName: string;
-  mimeType: string;
   bytes: number;
   width: number | null;
   height: number | null;
@@ -19,24 +19,19 @@ export interface MediaResponse {
 }
 
 /**
- * Association between a message and a media asset.
- */
-export interface AttachmentResponse {
-  id: string;
-  media: MediaResponse;
-}
-
-/**
- * Signed upload authorization details for client-side direct upload to Cloudinary.
+ * Presigned direct-upload authorization (docs/API.md §7.1).
+ * Every entry in `params` must be sent verbatim as a multipart form field
+ * to `uploadUrl` together with the `file` field.
  */
 export interface UploadSignatureResponse {
   mediaId: string;
-  cloudName: string;
-  apiKey: string;
-  timestamp: number;
-  signature: string;
-  folder: string;
-  publicId: string;
   uploadUrl: string;
-  expiresAt: number;
+  storageKey: string;
+  params: {
+    timestamp: number;
+    signature: string;
+    api_key: string;
+    public_id: string;
+  };
+  expiresAt: string;
 }

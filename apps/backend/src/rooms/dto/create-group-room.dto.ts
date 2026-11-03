@@ -17,10 +17,10 @@ import { trimString } from '../../common/dto/trim-string.js';
  * Payload for creating a new group conversation room.
  */
 export class CreateGroupRoomDto {
-  /** Name of the group room (1-80 characters) */
+  /** Name of the group room (1-100 characters) */
   @IsString()
   @IsNotEmpty()
-  @Length(1, 80)
+  @Length(1, 100)
   @Transform(trimString)
   name!: string;
 
@@ -34,17 +34,17 @@ export class CreateGroupRoomDto {
   /** Optional group avatar image URL (max 2048 characters) */
   @IsOptional()
   @IsString()
-  @IsUrl({ protocols: ['https', 'http'], require_tld: false })
+  @IsUrl({ protocols: ['https'], require_tld: false })
   @MaxLength(2048)
   @Transform(trimString)
   image?: string;
 
-  /** Initial user IDs to add as room members (1-100 members, unique) */
+  /** User IDs to invite as room members (1-99 users, unique; the creator is added as OWNER) */
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(99)
   @ArrayUnique()
   @IsString({ each: true })
   @Length(1, 64, { each: true })
-  memberIds!: string[];
+  memberUserIds!: string[];
 }

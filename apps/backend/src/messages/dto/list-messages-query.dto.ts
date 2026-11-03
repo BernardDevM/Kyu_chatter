@@ -1,12 +1,12 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto.js';
 
 /**
- * Query parameters for fetching paginated room message history (newest first).
+ * Query parameters for fetching paginated room message history.
  */
 export class ListMessagesQueryDto extends PaginationQueryDto {
-  /** Optional pagination direction ('before' or 'after', defaults to 'before') */
+  /** Pagination direction relative to the cursor ('before' or 'after', defaults to 'before') */
   @IsOptional()
-  @IsString()
-  direction?: 'before' | 'after';
+  @IsIn(['before', 'after'])
+  direction?: 'before' | 'after' = 'before';
 }

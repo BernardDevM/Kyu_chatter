@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { MessagesService } from './messages.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { ReceiptStatus } from '../generated/prisma/enums.js';
+import { MemberRole, ReceiptStatus } from '../generated/prisma/enums.js';
 
 describe('MessagesService', () => {
   let service: MessagesService;
@@ -25,7 +25,6 @@ describe('MessagesService', () => {
     editedAt: null,
     deletedAt: null,
     sender: { id: 'user_1', name: 'Alice', image: null },
-    replyTo: null,
     attachments: [],
     reactions: [],
   };
@@ -86,14 +85,38 @@ describe('MessagesService', () => {
         limit: 10,
       });
 
-      expect(res).toHaveLength(1);
-      expect(res[0]!.id).toBe('msg_1');
+      expect(res.items).toHaveLength(1);
+      expect(res.items[0]!.id).toBe('msg_1');
+      expect(res.hasMore).toBe(false);
+      expect(res.nextCursor).toBeNull();
       expect(prismaMock.message.findMany).toHaveBeenCalledWith({
         where: { roomId: 'room_1', createdAt: { gt: now } },
-        take: 10,
+        take: 11,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         include: expect.any(Object),
       });
+    });
+
+    it('paginates: hasMore and nextCursor (use as the next afterId) when more than limit', async () => {
+      prismaMock.roomMember.findUnique.mockResolvedValue({ userId: 'user_1' });
+      prismaMock.message.findUnique.mockResolvedValue({
+        id: 'msg_anchor',
+        roomId: 'room_1',
+        createdAt: now,
+      });
+      prismaMock.message.findMany.mockResolvedValue([
+        sampleMessage,
+        { ...sampleMessage, id: 'msg_2' },
+      ]);
+
+      const res = await service.syncMessages('user_1', 'room_1', {
+        afterId: 'msg_anchor',
+        limit: 1,
+      });
+
+      expect(res.items.map((m) => m.id)).toEqual(['msg_1']);
+      expect(res.hasMore).toBe(true);
+      expect(res.nextCursor).toBe('msg_1');
     });
 
     it('throws ForbiddenException if user is not in room', async () => {
@@ -245,16 +268,37 @@ describe('MessagesService', () => {
       });
     });
 
-    it('throws ForbiddenException if non-sender deletes message', async () => {
+    it('throws ForbiddenException if a plain member deletes someone else\'s message', async () => {
       prismaMock.message.findUnique.mockResolvedValue({
         ...sampleMessage,
         senderId: 'user_2',
       });
+      prismaMock.roomMember.findUnique.mockResolvedValue({ role: MemberRole.MEMBER });
 
       await expect(service.deleteMessage('user_1', 'msg_1')).rejects.toThrow(
         ForbiddenException,
       );
+      expect(prismaMock.message.update).not.toHaveBeenCalled();
     });
+
+    it.each([MemberRole.ADMIN, MemberRole.OWNER])(
+      'allows a room %s to delete someone else\'s message',
+      async (role) => {
+        prismaMock.message.findUnique.mockResolvedValue({
+          ...sampleMessage,
+          senderId: 'user_2',
+        });
+        prismaMock.roomMember.findUnique.mockResolvedValue({ role });
+        prismaMock.message.update.mockResolvedValue({});
+
+        await service.deleteMessage('user_1', 'msg_1');
+
+        expect(prismaMock.message.update).toHaveBeenCalledWith({
+          where: { id: 'msg_1' },
+          data: { deletedAt: expect.any(Date), body: null },
+        });
+      },
+    );
   });
 
   describe('reactions', () => {
@@ -273,7 +317,9 @@ describe('MessagesService', () => {
       const res = await service.addReaction('user_1', 'msg_1', { emoji: '👍' });
 
       expect(prismaMock.messageReaction.upsert).toHaveBeenCalled();
-      expect(res).toEqual([{ emoji: '👍', count: 2, reactedByMe: true }]);
+      expect(res).toEqual([
+        { emoji: '👍', count: 2, hasReacted: true, userIds: ['user_1', 'user_2'] },
+      ]);
     });
 
     it('removeReaction deletes reaction and returns summary', async () => {
@@ -303,18 +349,23 @@ describe('MessagesService', () => {
       prismaMock.roomMember.findUnique.mockResolvedValue({ userId: 'user_1' });
       prismaMock.messageReceipt.findMany.mockResolvedValue([
         {
+          messageId: 'msg_1',
           userId: 'user_2',
           status: ReceiptStatus.READ,
-          deliveredAt: now,
-          readAt: now,
+          updatedAt: now,
         },
       ]);
 
       const res = await service.getReceipts('user_1', 'msg_1');
 
-      expect(res).toHaveLength(1);
-      expect(res[0]!.userId).toBe('user_2');
-      expect(res[0]!.status).toBe(ReceiptStatus.READ);
+      expect(res).toEqual([
+        {
+          messageId: 'msg_1',
+          userId: 'user_2',
+          status: ReceiptStatus.READ,
+          updatedAt: now.toISOString(),
+        },
+      ]);
     });
   });
 });
