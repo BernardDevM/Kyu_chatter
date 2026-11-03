@@ -1,4 +1,3 @@
-
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { bearer } from 'better-auth/plugins';
@@ -15,23 +14,39 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-// Optional environment knob: BETTER_AUTH_SECURE_COOKIES ('true'|'false')
-// Mapped to advanced.useSecureCookies only when explicitly set.
-// Needed because production mode over plain http://localhost can silently drop Secure cookies.
+function resolveCrossSiteCookies(): boolean {
+  const explicit = process.env.BETTER_AUTH_CROSS_SITE_COOKIES;
+
+  if (explicit !== undefined) {
+    return explicit === 'true';
+  }
+
+  return (
+    process.env.NODE_ENV === 'production' &&
+    (process.env.BETTER_AUTH_URL ?? '').startsWith('https://')
+  );
+}
+
 const secureCookiesEnv = process.env.BETTER_AUTH_SECURE_COOKIES;
-const advanced =
-  secureCookiesEnv !== undefined
+const crossSiteCookies = resolveCrossSiteCookies();
+
+const advanced = crossSiteCookies
+  ? {
+      useSecureCookies: true,
+      defaultCookieAttributes: {
+        sameSite: 'none' as const,
+        secure: true,
+      },
+    }
+  : secureCookiesEnv !== undefined
     ? { useSecureCookies: secureCookiesEnv === 'true' }
     : undefined;
 
-// Optional environment knob: BETTER_AUTH_RATE_LIMIT_ENABLED ('true'|'false')
-// Disables Better Auth's built-in rate limit when set to 'false'; for load testing ONLY.
 const rateLimitEnv = process.env.BETTER_AUTH_RATE_LIMIT_ENABLED;
 const rateLimit =
   rateLimitEnv !== undefined
     ? { enabled: rateLimitEnv !== 'false' }
     : undefined;
-
 
 export function createBetterAuth(prisma: PrismaService) {
   return betterAuth({
