@@ -10,6 +10,9 @@ import type { Server } from 'socket.io';
  *
  * Broadcasting is best-effort: a failure is logged and never fails the REST request.
  */
+/** Personal Socket.IO channel every authenticated socket of a user joins on connect. */
+export const userChannel = (userId: string): string => `user:${userId}`;
+
 @Injectable()
 export class RealtimeEmitter {
   private readonly logger = new Logger(RealtimeEmitter.name);
@@ -30,6 +33,34 @@ export class RealtimeEmitter {
       this.server.to(roomId).emit(event, payload);
     } catch (err: unknown) {
       this.logger.warn(`Failed to emit "${event}" to room ${roomId}: ${errorMessage(err)}`);
+    }
+  }
+
+  /** Emits `event` to every live socket of one user (all tabs, all nodes). */
+  toUser(userId: string, event: string, payload: unknown): void {
+    if (!this.server) {
+      this.logger.debug(`No socket server attached; dropped "${event}" for user ${userId}`);
+      return;
+    }
+    try {
+      this.server.to(userChannel(userId)).emit(event, payload);
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to emit "${event}" to user ${userId}: ${errorMessage(err)}`);
+    }
+  }
+
+  /**
+   * Subscribes every live socket of `userId` (on any node) to the room channel, so a newly
+   * added member receives the room's broadcasts immediately, without a client round-trip.
+   */
+  async joinUserToRoom(userId: string, roomId: string): Promise<void> {
+    if (!this.server) return;
+    try {
+      await this.server.in(userChannel(userId)).socketsJoin(roomId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to join user ${userId} to room ${roomId}: ${errorMessage(err)}`,
+      );
     }
   }
 

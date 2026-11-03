@@ -18,7 +18,6 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RoomIdParamDto } from '../common/dto/room-id-param.dto.js';
 import { RoomMemberParamDto } from '../common/dto/room-member-param.dto.js';
@@ -59,7 +58,6 @@ import {
 
 
 export class RoomsController {
-  
   constructor(
     private readonly roomsService: RoomsService,
     @Optional() private readonly realtime?: RealtimeEmitter,
@@ -75,7 +73,9 @@ export class RoomsController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateGroupRoomDto,
   ): Promise<RoomDetailResponse> {
-    return this.roomsService.createGroupRoom(userId, dto);
+    const room = await this.roomsService.createGroupRoom(userId, dto);
+    await this.announceNewRoom(room, userId);
+    return room;
   }
 
   /**
@@ -88,7 +88,10 @@ export class RoomsController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateDirectRoomDto,
   ): Promise<RoomDetailResponse> {
-    return this.roomsService.createDirectRoom(userId, dto);
+    const room = await this.roomsService.createDirectRoom(userId, dto);
+    // Idempotent: re-opening an existing DM just refreshes the other user's list entry.
+    await this.announceNewRoom(room, userId);
+    return room;
   }
 
   /**
@@ -173,6 +176,10 @@ export class RoomsController {
     @Body() dto: AddMembersDto,
   ): Promise<RoomMemberResponse[]> {
     const added = await this.roomsService.addMembers(userId, params.roomId, dto);
+    await this.announceRoomToUsers(
+      params.roomId,
+      added.map((m) => m.user.id).filter((id) => id !== userId),
+    );
     for (const member of added) {
       this.realtime?.toRoom(params.roomId, WS_SERVER_EVENTS.MEMBER_JOINED, {
         roomId: params.roomId,
@@ -229,6 +236,38 @@ export class RoomsController {
   ): Promise<void> {
     await this.roomsService.leaveRoom(userId, params.roomId);
     await this.announceMemberLeft(params.roomId, userId);
+  }
+
+  /**
+   * Pushes a newly created room to every member except the creator (who already has it
+   * from the HTTP response), so it appears in their list without a refresh.
+   */
+  private async announceNewRoom(room: RoomDetailResponse, creatorId: string): Promise<void> {
+    if (!this.realtime) return;
+    await this.announceRoomToUsers(
+      room.id,
+      room.members.map((m) => m.userId).filter((id) => id !== creatorId),
+    );
+  }
+
+  /**
+   * For each user: subscribe their live sockets to the room channel first (so they cannot
+   * miss the first message), then send them a `room:updated` built for their own view
+   * (their unread count and preferences, not the actor's). Best-effort: never fails the request.
+   */
+  private async announceRoomToUsers(roomId: string, userIds: string[]): Promise<void> {
+    if (!this.realtime) return;
+    await Promise.all(
+      userIds.map(async (id) => {
+        try {
+          await this.realtime?.joinUserToRoom(id, roomId);
+          const detail = await this.roomsService.getRoom(id, roomId);
+          this.realtime?.toUser(id, WS_SERVER_EVENTS.ROOM_UPDATED, detail);
+        } catch {
+          // Offline users pick the room up from the REST list on their next load.
+        }
+      }),
+    );
   }
 
   /**
