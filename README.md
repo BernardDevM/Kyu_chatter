@@ -199,7 +199,7 @@ Rules that make this safe:
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 19, Vite, TypeScript |
+| Frontend | React 19, React Router (SPA), Tailwind CSS 4, shadcn/ui (Radix), TanStack Query, Zustand, Socket.IO Client |
 | Backend | NestJS 12, TypeScript (ESM) |
 | Realtime | Socket.IO (WebSocket transport), Redis adapter |
 | Auth | Better Auth (email OTP), `@thallesp/nestjs-better-auth` |
@@ -282,8 +282,17 @@ The full schema is in [`apps/backend/prisma/schema.prisma`](apps/backend/prisma/
 │  │  │  └─ load/                Distributed load test runner, statistics engine, results harness
 │  │  ├─ .env.example            Template for local environment configuration
 │  │  └─ Dockerfile              Multi-stage production container build
-│  └─ frontend/                  React + Vite single-page app
-│     └─ src/                    Frontend client
+│  └─ frontend/                  React Router (SPA) + Tailwind CSS 4 web client
+│     ├─ app/
+│     │  ├─ routes/              Flat routes: auth (login/signup), chat layout, chat.$roomId
+│     │  ├─ features/            Feature domains: auth, rooms, messages, realtime, presence, users, media
+│     │  ├─ components/          Radix/shadcn ui/, layout shell & sidebar, state feedback views
+│     │  ├─ providers/           Theme, WebSocket realtime lifetime, global dialog drawers
+│     │  ├─ hooks/ & lib/        Reusable hooks, Axios API client, TanStack Query keys
+│     │  ├─ root.tsx & routes.ts Application root shell and route definitions
+│     │  └─ styles.css           Tailwind CSS 4 styles
+│     ├─ package.json            Dependencies and frontend scripts
+│     └─ vite.config.ts          Vite + React Router bundler configuration
 ├─ docs/
 │  ├─ API.md                     Full REST + WebSocket contract
 │  ├─ DEPLOYMENT.md              Production deployment guide
@@ -354,11 +363,23 @@ If pnpm prints a warning about ignored build scripts, run `pnpm approve-builds` 
 
 ### 3. Frontend
 
+The web app is a React 19 single-page application built with React Router, Tailwind CSS 4, shadcn/ui components, TanStack Query, Zustand, and Socket.IO client.
+
 ```bash
 cd apps/frontend
+cp .env.example .env        # configure VITE_API_BASE_URL
 pnpm install
-pnpm dev                    # http://localhost:5173
+pnpm dev                    # starts dev server on http://localhost:5173
 ```
+
+**Environment variables** (`apps/frontend/.env`):
+
+| Variable | Needed | Purpose |
+|---|---|---|
+| `VITE_API_BASE_URL` | required | Backend base URL (`http://localhost:8080` behind Traefik or `http://localhost:3000` direct) |
+
+**Development Login:**
+When the backend runs with `ALLOW_DEV_USER_HEADER=true` (development mode), the frontend sign-in page (`/auth/login`) provides a **Dev Login** box allowing one-click authentication as any existing user ID without password or OTP entry.
 
 ### 4. Check that it works
 
@@ -382,6 +403,18 @@ Open <http://localhost:3000/api/docs> for the interactive Swagger UI.
 | `pnpm prisma migrate dev --name <what-changed>` | Create and apply a new migration (use a dev database) |
 | `pnpm prisma studio` | Browse your database in the browser |
 | `pnpm nest g mo\|co\|s <name> --no-spec` | Generate a Nest module, controller or service |
+| `pnpm load:test` | Run distributed load testing and failover verification harness |
+
+### Useful commands (run in `apps/frontend`)
+
+| Command | What it does |
+|---|---|
+| `pnpm dev` | Run the React web client with HMR (`http://localhost:5173`) |
+| `pnpm build` | Run React Router typegen, compile TypeScript, and build client bundle |
+| `pnpm start` | Preview the production build locally via Vite preview |
+| `pnpm typecheck` | Run React Router typegen and verify TypeScript types |
+| `pnpm lint` | Lint with ESLint |
+| `pnpm lint:fix` | Automatically resolve ESLint formatting and rule warnings |
 
 ## Working with the API
 
@@ -482,10 +515,10 @@ Ask a teammate to review. Merge when it builds and tests pass.
 | Beginner | Implement `UsersService.getMe`, `updateMe`, `getProfile` and `search` with Prisma | **Done** |
 | Beginner | Add a Prisma seed script that creates demo users and rooms | Open |
 | Beginner | Improve `docs/API.md` with example requests and responses | **Done** |
-| Beginner | Frontend: login page with email + OTP code form | Open |
+| Beginner | Frontend: login page with email + OTP / password and dev login | **Done** (`apps/frontend`) |
 | Intermediate | Implement `RoomsService` (create group, get-or-create DM, list with unread counts, membership checks) | **Done** |
 | Intermediate | Implement `MessagesService` (cursor pagination, idempotent send, soft delete, resync) | **Done** |
-| Intermediate | Frontend: room list, chat view and a Socket.IO client hook with reconnect and resync | Open |
+| Intermediate | Frontend: room list, chat view and a Socket.IO client hook with reconnect and resync | **Done** (`apps/frontend`) |
 | Intermediate | Write the load-test script in `apps/backend/test/load/` and record latency numbers | **Done** |
 | Advanced | Wire Better Auth (`auth.ts`, Nest module, session on the WebSocket handshake) | **Done** |
 | Advanced | Socket.IO Redis adapter so messages cross nodes; presence with Redis sorted sets | **Done** |
