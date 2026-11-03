@@ -2,18 +2,36 @@ import 'dotenv/config';
 import dns from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module.js';
 import { createPingHandler } from './health/ping.handler.js';
 import { PrismaService } from './prisma/prisma.service.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
 import { corsOriginCallback } from './common/utils/cors.util.js';
 
-
-
 dns.setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+
+  // Behind reverse proxy (Traefik)
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', 1);
+
+  // Enable graceful shutdown hooks for container lifecycle
+  app.enableShutdownHooks();
+
+  // Security headers: relax CSP on Swagger UI docs
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const path = req.path || req.url || '';
+    if (path.startsWith('/api/docs') || path.startsWith('/docs')) {
+      return helmet({
+        contentSecurityPolicy: false,
+      })(req, res, next);
+    }
+    return helmet()(req, res, next);
+  });
 
   // Before enableCors(): CORS would answer OPTIONS /ping without hitting the DB.
   app.use('/ping', createPingHandler(app.get(PrismaService)));

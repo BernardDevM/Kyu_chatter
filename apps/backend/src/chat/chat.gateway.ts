@@ -9,8 +9,6 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
-import { fromNodeHeaders } from 'better-auth/node';
-import { auth } from '../auth/auth.js';
 import { WsAuthGuard } from '../common/guards/ws-auth.guard.js';
 import { WsThrottleGuard } from '../common/guards/ws-throttle.guard.js';
 import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS } from './chat.events.js';
@@ -26,6 +24,14 @@ import { MarkReadWsDto } from './dto/ws/mark-read.ws-dto.js';
 import { TypingWsDto } from './dto/ws/typing.ws-dto.js';
 import { ResyncWsDto } from './dto/ws/resync.ws-dto.js';
 import { corsOriginCallback } from '../common/utils/cors.util.js';
+import { resolveSocketUser, type SocketUser } from '../common/utils/socket-user.util.js';
+
+export interface WsAckError {
+  ok: false;
+  code: string;
+  message: string;
+  error: string;
+}
 
 @WebSocketGateway({
   cors: {
@@ -56,64 +62,59 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   /**
-   * Connection hook - attaches user session and registers Redis presence.
+   * Connection hook - verifies authentication, rejects invalid sockets,
+   * and scopes presence updates to user's rooms.
    */
   async handleConnection(client: Socket): Promise<void> {
     try {
-      let user = (client.data as any)?.user;
+      const user = await resolveSocketUser(client);
 
-      if (!user) {
-        try {
-          const headers = fromNodeHeaders(client.handshake?.headers || {});
-          const session = await auth.api.getSession({ headers });
-          if (session?.user) {
-            user = session.user;
-          }
-        } catch {
-          // Continue to dev fallback
-        }
+      if (!user?.id) {
+        this.logger.debug(`Rejecting unauthenticated connection: ${client.id}`);
+        client.emit(WS_SERVER_EVENTS.ERROR, {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+        client.disconnect(true);
+        return;
       }
 
-      if (!user) {
-        const devHeader = client.handshake?.headers?.['x-dev-user-id'];
-        const devAuthUser =
-          (client.handshake?.auth as { userId?: string } | undefined)?.userId ??
-          (Array.isArray(devHeader) ? devHeader[0] : devHeader);
+      client.data.user = user;
+      const isFirst = await this.presenceService.addConnection(user.id, client.id);
 
-        if (typeof devAuthUser === 'string' && devAuthUser.trim().length > 0) {
-          user = {
-            id: devAuthUser.trim(),
-            name: 'Dev User',
-            email: `${devAuthUser.trim()}@example.com`,
-          };
-        }
-      }
+      if (isFirst && this.server) {
+        const userRooms = await this.prisma.roomMember.findMany({
+          where: { userId: user.id },
+          select: { roomId: true },
+        });
 
-      if (user?.id) {
-        client.data.user = user;
-        const isFirst = await this.presenceService.addConnection(user.id, client.id);
-
-        if (isFirst && this.server) {
-          this.server.emit(WS_SERVER_EVENTS.PRESENCE_UPDATE, {
+        if (userRooms.length > 0) {
+          const roomIds = userRooms.map((r) => r.roomId);
+          this.server.to(roomIds).emit(WS_SERVER_EVENTS.PRESENCE_UPDATE, {
             userId: user.id,
             online: true,
             lastSeenAt: null,
           });
         }
-        this.logger.log(`Authenticated client connected: ${client.id} (user: ${user.id})`);
-      } else {
-        this.logger.debug(`Client connected without active session: ${client.id}`);
       }
-    } catch (err: any) {
-      this.logger.warn(`Error during socket connection handshake: ${err.message}`);
+
+      this.logger.log(`Authenticated client connected: ${client.id} (user: ${user.id})`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Error during socket connection handshake: ${errMsg}`);
+      client.emit(WS_SERVER_EVENTS.ERROR, {
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+      });
+      client.disconnect(true);
     }
   }
 
   /**
-   * Disconnection hook - removes Redis presence and persists lastSeenAt if last connection.
+   * Disconnection hook - removes presence and emits scoped offline updates to user rooms.
    */
   async handleDisconnect(client: Socket): Promise<void> {
-    const userId = (client?.data as any)?.user?.id;
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
     if (userId) {
       const { wasLast, lastSeenAt } = await this.presenceService.removeConnection(
         userId,
@@ -121,11 +122,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
 
       if (wasLast && this.server) {
-        this.server.emit(WS_SERVER_EVENTS.PRESENCE_UPDATE, {
-          userId,
-          online: false,
-          lastSeenAt,
+        const userRooms = await this.prisma.roomMember.findMany({
+          where: { userId },
+          select: { roomId: true },
         });
+
+        if (userRooms.length > 0) {
+          const roomIds = userRooms.map((r) => r.roomId);
+          this.server.to(roomIds).emit(WS_SERVER_EVENTS.PRESENCE_UPDATE, {
+            userId,
+            online: false,
+            lastSeenAt,
+          });
+        }
       }
       this.logger.log(`Client disconnected: ${client.id} (user: ${userId})`);
     } else {
@@ -138,7 +147,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   @SubscribeMessage('presence:heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket): Promise<{ ok: true }> {
-    const userId = (client?.data as any)?.user?.id;
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
     if (userId) {
       await this.presenceService.heartbeat(userId, client.id);
     }
@@ -146,14 +155,42 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Subscribes the socket to a room channel.
+   * Subscribes the socket to a room channel after verifying active membership.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.ROOM_JOIN)
   async handleJoinRoom(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: JoinRoomWsDto,
-  ): Promise<{ ok: true; roomId: string }> {
-    const userId = (client?.data as any)?.user?.id;
+  ): Promise<{ ok: true; roomId: string } | WsAckError> {
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
+    if (!userId) {
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+        error: 'Authentication required',
+      };
+    }
+
+    const membership = await this.prisma.roomMember.findUnique({
+      where: {
+        roomId_userId: {
+          roomId: payload.roomId,
+          userId,
+        },
+      },
+      select: { roomId: true },
+    });
+
+    if (!membership) {
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: 'You are not a member of this room',
+        error: 'You are not a member of this room',
+      };
+    }
+
     await client.join(payload.roomId);
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.MEMBER_JOINED, {
       roomId: payload.roomId,
@@ -171,13 +208,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: LeaveRoomWsDto,
   ): Promise<{ ok: true; roomId: string }> {
-    const userId = (client?.data as any)?.user?.id;
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
     await client.leave(payload.roomId);
-    client.to(payload.roomId).emit(WS_SERVER_EVENTS.MEMBER_LEFT, {
-      roomId: payload.roomId,
-      userId,
-    });
-    this.logger.log(`Client ${client.id} (user: ${userId}) left room ${payload.roomId}`);
+    if (userId) {
+      client.to(payload.roomId).emit(WS_SERVER_EVENTS.MEMBER_LEFT, {
+        roomId: payload.roomId,
+        userId,
+      });
+    }
+    this.logger.log(`Client ${client.id} (user: ${userId ?? 'unknown'}) left room ${payload.roomId}`);
     return { ok: true, roomId: payload.roomId };
   }
 
@@ -188,10 +227,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SendMessageWsDto,
-  ): Promise<{ ok: boolean; data?: any; error?: string }> {
-    const user = (client?.data as any)?.user;
+  ): Promise<{ ok: true; data: unknown } | WsAckError> {
+    const user = (client.data as { user?: SocketUser })?.user;
     if (!user?.id) {
-      return { ok: false, error: 'Unauthorized' };
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+        error: 'Unauthorized',
+      };
     }
 
     try {
@@ -209,49 +253,75 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `Broadcast message ${payload.clientMessageId} to room ${payload.roomId} across cluster`,
       );
       return { ok: true, data: message };
-    } catch (err: any) {
-      this.logger.warn(`Failed to send message: ${err.message}`);
-      return { ok: false, error: err.message };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to send message: ${errMsg}`);
+      return {
+        ok: false,
+        code: 'SEND_FAILED',
+        message: errMsg,
+        error: errMsg,
+      };
     }
   }
 
   /**
    * Updates read receipts and read cursors for a room member.
+   * Requires socket to have joined the room.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.MESSAGE_READ)
   async handleMarkRead(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: MarkReadWsDto,
-  ): Promise<{ ok: boolean }> {
-    const userId = (client?.data as any)?.user?.id;
-    if (userId) {
-      await this.prisma.roomMember
-        .update({
-          where: { roomId_userId: { roomId: payload.roomId, userId } },
-          data: { lastReadMessageId: payload.messageId },
-        })
-        .catch(() => {});
+  ): Promise<{ ok: true } | WsAckError> {
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
+    if (!userId) {
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+        error: 'Authentication required',
+      };
+    }
 
-      await this.prisma.messageReceipt
-        .upsert({
-          where: {
-            messageId_userId: {
-              messageId: payload.messageId,
-              userId,
-            },
-          },
-          update: {
-            status: ReceiptStatus.READ,
-            readAt: new Date(),
-          },
-          create: {
+    if (!client.rooms.has(payload.roomId)) {
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: 'You must join the room before marking messages as read',
+        error: 'You must join the room before marking messages as read',
+      };
+    }
+
+    try {
+      await this.prisma.roomMember.update({
+        where: { roomId_userId: { roomId: payload.roomId, userId } },
+        data: { lastReadMessageId: payload.messageId },
+      });
+
+      await this.prisma.messageReceipt.upsert({
+        where: {
+          messageId_userId: {
             messageId: payload.messageId,
             userId,
-            status: ReceiptStatus.READ,
-            readAt: new Date(),
           },
-        })
-        .catch(() => {});
+        },
+        update: {
+          status: ReceiptStatus.READ,
+          readAt: new Date(),
+        },
+        create: {
+          messageId: payload.messageId,
+          userId,
+          status: ReceiptStatus.READ,
+          readAt: new Date(),
+        },
+      });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to persist message read receipt for message ${payload.messageId}: ${errMsg}`,
+      );
     }
 
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.MESSAGE_READ, {
@@ -266,17 +336,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Emits user typing indicator start (ephemeral, not written to DB).
+   * Emits user typing indicator start.
+   * Requires socket to have joined the room.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_START)
   async handleTypingStart(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingWsDto,
-  ): Promise<{ ok: true }> {
-    const userId = (client?.data as any)?.user?.id;
-    if (userId) {
-      await this.typingService.setTyping(payload.roomId, userId);
+  ): Promise<{ ok: true } | WsAckError> {
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
+    if (!userId) {
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+        error: 'Authentication required',
+      };
     }
+
+    if (!client.rooms.has(payload.roomId)) {
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: 'You must join the room before sending typing indicators',
+        error: 'You must join the room before sending typing indicators',
+      };
+    }
+
+    await this.typingService.setTyping(payload.roomId, userId);
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.TYPING, {
       roomId: payload.roomId,
       userId,
@@ -286,17 +373,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Emits user typing indicator stop (ephemeral, not written to DB).
+   * Emits user typing indicator stop.
+   * Requires socket to have joined the room.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_STOP)
   async handleTypingStop(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: TypingWsDto,
-  ): Promise<{ ok: true }> {
-    const userId = (client?.data as any)?.user?.id;
-    if (userId) {
-      await this.typingService.removeTyping(payload.roomId, userId);
+  ): Promise<{ ok: true } | WsAckError> {
+    const userId = (client.data as { user?: SocketUser })?.user?.id;
+    if (!userId) {
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+        error: 'Authentication required',
+      };
     }
+
+    if (!client.rooms.has(payload.roomId)) {
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: 'You must join the room before sending typing indicators',
+        error: 'You must join the room before sending typing indicators',
+      };
+    }
+
+    await this.typingService.removeTyping(payload.roomId, userId);
     client.to(payload.roomId).emit(WS_SERVER_EVENTS.TYPING, {
       roomId: payload.roomId,
       userId,
@@ -312,10 +416,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleResync(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: ResyncWsDto,
-  ): Promise<{ ok: boolean; rooms: any[] }> {
-    const user = (client?.data as any)?.user;
+  ): Promise<{ ok: true; rooms: unknown[] } | (WsAckError & { rooms: unknown[] })> {
+    const user = (client.data as { user?: SocketUser })?.user;
     if (!user?.id) {
-      return { ok: false, rooms: [] };
+      return {
+        ok: false,
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+        error: 'Unauthorized',
+        rooms: [],
+      };
     }
 
     const rooms = await Promise.all(

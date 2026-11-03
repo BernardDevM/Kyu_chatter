@@ -563,20 +563,44 @@ Direct uploads bypass backend file streams by generating a presigned Cloudinary 
 
 The WebSocket gateway is exposed via Socket.IO (`ChatGateway`) backed by a Redis pub/sub adapter (`@socket.io/redis-adapter`) for cross-node message delivery. Incoming payloads are automatically validated using NestJS `ValidationPipe`.
 
-### 9.1 Client-to-Server Events (`WS_CLIENT_EVENTS`)
+### 9.1 Standardized Acknowledgement (Ack) Formats
+
+All client-to-server operations returning acknowledgements follow a standardized shape:
+
+#### Success Ack:
+```json
+{
+  "ok": true,
+  "roomId": "018f3a5a-8b9a-7c2d-9e1f-111111111111",
+  "data": { ... }
+}
+```
+
+#### Error Ack:
+```json
+{
+  "ok": false,
+  "code": "FORBIDDEN",
+  "message": "You are not a member of this room",
+  "error": "You are not a member of this room"
+}
+```
+*(Both `message` and `error` are provided for backward and forward frontend compatibility).*
+
+### 9.2 Client-to-Server Events (`WS_CLIENT_EVENTS`)
 
 | Event Name | DTO Class | Payload Fields & Validation | Server Ack / Response |
 |---|---|---|---|
-| `room:join` | `JoinRoomWsDto` | `roomId` (`@IsUUID('all')`) | `{ ok: true, roomId }` |
+| `room:join` | `JoinRoomWsDto` | `roomId` (`@IsUUID('all')`) | `{ ok: true, roomId }` or `{ ok: false, code: "FORBIDDEN", message: "...", error: "..." }` |
 | `room:leave` | `LeaveRoomWsDto` | `roomId` (`@IsUUID('all')`) | `{ ok: true, roomId }` |
-| `message:send` | `SendMessageWsDto` | `roomId` (`UUID`), `clientMessageId` (`UUID`), `body?` (1-2000), `replyToId?` (`UUID`), `mediaIds?` (`UUID[]`). *Body or mediaIds required.* | `{ ok: true, data: MessageObject }` |
-| `message:read` | `MarkReadWsDto` | `roomId` (`UUID`), `messageId` (`UUID`) | `{ ok: true }` |
-| `typing:start` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` |
-| `typing:stop` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` |
-| `rooms:resync` | `ResyncWsDto` | `rooms`: Array of `{ roomId: string, lastMessageId?: string }` | `{ ok: true, rooms: [...] }` |
+| `message:send` | `SendMessageWsDto` | `roomId` (`UUID`), `clientMessageId` (`UUID`), `body?` (1-2000), `replyToId?` (`UUID`), `mediaIds?` (`UUID[]`). *Body or mediaIds required.* | `{ ok: true, data: MessageObject }` or `{ ok: false, code: "SEND_FAILED", ... }` |
+| `message:read` | `MarkReadWsDto` | `roomId` (`UUID`), `messageId` (`UUID`) | `{ ok: true }` or `{ ok: false, code: "FORBIDDEN", ... }` |
+| `typing:start` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` or `{ ok: false, code: "FORBIDDEN", ... }` |
+| `typing:stop` | `TypingWsDto` | `roomId` (`UUID`) | `{ ok: true }` or `{ ok: false, code: "FORBIDDEN", ... }` |
+| `rooms:resync` | `ResyncWsDto` | `rooms`: Array of `{ roomId: string, lastMessageId?: string }` | `{ ok: true, rooms: [...] }` or `{ ok: false, code: "UNAUTHORIZED", ... }` |
 | `presence:heartbeat` | None | None | `{ ok: true }` |
 
-### 9.2 Server-to-Client Events (`WS_SERVER_EVENTS`)
+### 9.3 Server-to-Client Events (`WS_SERVER_EVENTS`)
 
 | Event Name | Broadcast Scope | Payload Schema | Description |
 |---|---|---|---|
@@ -586,11 +610,11 @@ The WebSocket gateway is exposed via Socket.IO (`ChatGateway`) backed by a Redis
 | `message:read` | Room members (all nodes) | `{ roomId: string, userId: string, messageId: string }` | Broadcast when a member marks a message read |
 | `reaction:updated` | Room members (all nodes) | `{ messageId: string, reactions: ReactionSummaryResponse[] }` | Broadcast when a reaction is added or removed |
 | `typing` | Room members (excl. sender) | `{ roomId: string, userId: string, isTyping: boolean }` | Ephemeral broadcast when a user starts or stops typing |
-| `presence:update` | Cluster / Connected clients | `{ userId: string, online: boolean, lastSeenAt: string \| null }` | Broadcast when user connectivity state changes |
+| `presence:update` | User's joined rooms only | `{ userId: string, online: boolean, lastSeenAt: string \| null }` | Broadcast when user connectivity state changes (scoped to mutual room members) |
 | `member:joined` | Room members | `{ roomId: string, userId: string }` | Broadcast when a member joins the room |
 | `member:left` | Room members | `{ roomId: string, userId: string }` | Broadcast when a member leaves the room |
 | `room:updated` | Room members | `RoomDetailResponse` | Broadcast when room metadata changes |
-| `error` | Emitting socket | `{ code: string, message: string, details?: unknown }` | Sent on validation or operational errors |
+| `error` | Emitting socket | `{ code: string, message: string, details?: unknown }` | Sent on connection rejection (`UNAUTHORIZED`) or operational errors |
 
 ---
 
