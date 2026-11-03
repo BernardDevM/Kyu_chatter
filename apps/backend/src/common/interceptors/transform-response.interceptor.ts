@@ -26,6 +26,12 @@ export class TransformResponseInterceptor<T>
     context: ExecutionContext,
     next: CallHandler<T>,
   ): Observable<ApiResponse<T> | T> {
+    // Only wrap HTTP responses. WebSocket acks already use their own
+    // { ok, data } shape and must not be wrapped a second time.
+    if (context.getType() !== 'http') {
+      return next.handle();
+    }
+
     const http = context.switchToHttp();
     const response = http.getResponse<Response>();
     const request = http.getRequest<Request>();
