@@ -18,6 +18,7 @@ export function useAuthService() {
   const navigate = useNavigate();
   const devUserId = useUserSessionStore((s) => s.devUserId);
   const setDevUserId = useUserSessionStore((s) => s.setDevUserId);
+  const setAuthToken = useUserSessionStore((s) => s.setAuthToken);
 
   // Dev identity -> /api/users/me with the dev header; otherwise the cookie session.
   const session = useQuery({
@@ -77,6 +78,7 @@ export function useAuthService() {
     },
     onSettled: () => {
       setDevUserId(null);
+      setAuthToken(null);
       queryClient.clear();
     },
     onError: (e) => handleError(e),

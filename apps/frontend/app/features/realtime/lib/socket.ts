@@ -36,11 +36,14 @@ export function getSocket(): Socket | null {
 
 export function connectSocket(): Socket {
   if (socket) return socket;
-  const devUserId = useUserSessionStore.getState().devUserId;
+  const { devUserId, authToken } = useUserSessionStore.getState();
   socket = io(API_BASE_URL, {
     transports: ["websocket"],
     withCredentials: true,
-    auth: devUserId ? { userId: devUserId } : undefined,
+    auth: {
+      ...(authToken ? { token: authToken } : {}),
+      ...(devUserId ? { userId: devUserId } : {}),
+    },
   });
   return socket;
 }

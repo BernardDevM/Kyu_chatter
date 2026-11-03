@@ -47,7 +47,7 @@ async function bootstrap() {
       'Accept',
       'Origin',
     ],
-    exposedHeaders: ['X-Node-Id'],
+    exposedHeaders: ['X-Node-Id', 'set-auth-token'],
   });
 
   const redisIoAdapter = new RedisIoAdapter(app);
