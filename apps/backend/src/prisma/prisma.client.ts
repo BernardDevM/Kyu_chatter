@@ -5,10 +5,17 @@ import "dotenv/config"
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
 
-const databaseUrl = process.env.DATABASE_URL;
+let databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is not configured.');
+}
+
+if (
+  (databaseUrl.startsWith('"') && databaseUrl.endsWith('"')) ||
+  (databaseUrl.startsWith("'") && databaseUrl.endsWith("'"))
+) {
+  databaseUrl = databaseUrl.slice(1, -1);
 }
 
 const url = new URL(databaseUrl);

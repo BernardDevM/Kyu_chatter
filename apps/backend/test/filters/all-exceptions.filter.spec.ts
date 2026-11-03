@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BadRequestException, type ArgumentsHost } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException, type ArgumentsHost } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.filter.js';
 
@@ -113,5 +113,20 @@ describe('AllExceptionsFilter', () => {
     };
     expect(body.success).toBe(false);
     expect(body.error.statusCode).toBe(404);
+  });
+
+  it('bypasses response envelope for health check exceptions', () => {
+    const { host, getStatus, getBody, getHeaders } = createMockHost('/health/ready');
+    const healthPayload = {
+      status: 'degraded',
+      checks: { database: 'up', redis: 'down' },
+    };
+    const exception = new ServiceUnavailableException(healthPayload);
+
+    filter.catch(exception, host);
+
+    expect(getStatus()).toBe(503);
+    expect(getBody()).toEqual(healthPayload);
+    expect(getHeaders()['X-Node-Id']).toBeDefined();
   });
 });

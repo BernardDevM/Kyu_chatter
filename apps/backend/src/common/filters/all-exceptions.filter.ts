@@ -30,6 +30,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
+    if (typeof host.getType === 'function' && host.getType() !== 'http') {
+      return;
+    }
+
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
@@ -93,6 +97,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const path = request?.originalUrl ?? request?.url ?? '';
+    const isHealthPath = path.startsWith('/health') || path === '/health';
+    if (isHealthPath && exception instanceof HttpException) {
+      const res = exception.getResponse();
+      response
+        .status(statusCode)
+        .json(typeof res === 'object' && res !== null ? res : { message: res });
+      return;
+    }
+
     const errorBody: ErrorEnvelope = {
       success: false,
       error: {

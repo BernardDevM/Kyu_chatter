@@ -21,6 +21,8 @@ RUN pnpm run build
 FROM node:${NODE_VERSION} AS production
 ARG PNPM_VERSION
 
+ENV NODE_ENV=production
+
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 WORKDIR /app
@@ -29,5 +31,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile --prod
 
-COPY --from=builder /app/dist/ ./dist
+COPY --from=builder --chown=node:node /app/dist/ ./dist
+
+USER node
+
 CMD ["node", "dist/main.js"]

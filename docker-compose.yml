@@ -13,5 +13,62 @@ services:
       timeout: 3s
       retries: 5
 
+  api-1: &api-service
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: kyu-api-1
+    restart: unless-stopped
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - NODE_ID=node-1
+      - REDIS_URL=redis://redis:6379
+      - ALLOW_DEV_USER_HEADER=false
+      - BETTER_AUTH_URL=http://localhost:8080
+      - FRONTEND_URLS=http://localhost:5173
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  api-2:
+    <<: *api-service
+    container_name: kyu-api-2
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - NODE_ID=node-2
+      - REDIS_URL=redis://redis:6379
+      - ALLOW_DEV_USER_HEADER=false
+      - BETTER_AUTH_URL=http://localhost:8080
+      - FRONTEND_URLS=http://localhost:5173
+
+  traefik:
+    image: traefik:v3.3
+    container_name: kyu-traefik
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8081:8080"
+    volumes:
+      - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infra/traefik/dynamic:/etc/traefik/dynamic:ro
+    depends_on:
+      - api-1
+      - api-2
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
 volumes:
   redis_data:
