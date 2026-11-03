@@ -12,6 +12,7 @@ import { handleError } from "@/lib/handle-error";
 
 import { useEditMessage, useSendMessage } from "../api/use-message-service";
 import { useComposerStore } from "../stores/composer-store";
+import { EmojiPicker } from "./emoji-picker";
 
 const MAX_LENGTH = 2000; // websocket limit (REST allows 4000)
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -91,6 +92,20 @@ export function MessageComposer({ roomId }: { roomId: string }) {
     setReplyTo(roomId, undefined);
   };
 
+  const insertEmoji = (emoji: string) => {
+    const el = input.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? start;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    if (next.length > MAX_LENGTH) return;
+    setText(next);
+    if (!editing) typing.notify();
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  };
+
   const cancelContext = () => {
     setReplyTo(roomId, undefined);
     if (editing) {
@@ -164,6 +179,7 @@ export function MessageComposer({ roomId }: { roomId: string }) {
               <Paperclip />
             </Button>
           )}
+          <EmojiPicker onPick={insertEmoji} />
           <Textarea
             ref={input}
             value={text}
