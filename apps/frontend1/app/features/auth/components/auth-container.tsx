@@ -24,9 +24,9 @@ export function AuthContainer({
 }) {
   return (
     <div className="h-dvh w-full overflow-y-auto p-0 lg:p-3">
-      <div className="grid min-h-full gap-3 lg:min-h-[calc(100dvh-1.5rem)] lg:grid-cols-[1.05fr_1fr]">
-        {/* brand panel: clipped, so the oversized wordmark never adds scroll */}
-        <aside className="bg-rail text-rail-foreground relative hidden overflow-hidden rounded-[2rem] lg:block">
+      <div className="grid min-h-full lg:min-h-[calc(100dvh-1.5rem)] lg:grid-cols-[1.05fr_1fr] lg:overflow-hidden lg:rounded-[2rem] lg:border lg:shadow-sm">
+        {/* brand panel and form panel share one card; the wordmark is clipped so it never adds scroll */}
+        <aside className="bg-rail text-rail-foreground relative hidden overflow-hidden lg:block">
           <span
             aria-hidden="true"
             className="font-display text-signal pointer-events-none absolute -bottom-[0.16em] -left-[0.03em] text-[min(15rem,26vw)] leading-none font-extrabold tracking-tighter select-none"
@@ -66,7 +66,7 @@ export function AuthContainer({
         </aside>
 
         {/* form panel */}
-        <main className="bg-card relative flex min-h-dvh items-center justify-center px-6 py-10 lg:min-h-0 lg:rounded-[2rem]">
+        <main className="bg-card relative flex min-h-dvh items-center justify-center px-6 py-10 lg:min-h-0">
           <div className="absolute top-4 right-4">
             <ThemeToggle />
           </div>
