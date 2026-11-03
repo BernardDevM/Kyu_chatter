@@ -18,6 +18,7 @@ import { useAuthService } from "../api/use-auth-service";
 import { signInSchema,type SignInValues } from "../schemas/auth-schema";
 import { AuthContainer } from "./auth-container";
 import { DevLogin } from "./dev-login";
+import { GoogleAuth } from "./google-auth";
 
 export function LoginForm() {
   const { signIn } = useAuthService();
@@ -80,6 +81,7 @@ export function LoginForm() {
           </Button>
         </form>
       </Form>
+      <GoogleAuth />
       <DevLogin />
     </AuthContainer>
   );

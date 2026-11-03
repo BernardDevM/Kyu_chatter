@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { useAuthService } from "../api/use-auth-service";
 import { signUpSchema,type SignUpValues } from "../schemas/auth-schema";
 import { AuthContainer } from "./auth-container";
+import { GoogleAuth } from "./google-auth";
 
 export function SignupForm() {
   const { signUp } = useAuthService();
@@ -92,6 +93,7 @@ export function SignupForm() {
           </Button>
         </form>
       </Form>
+      <GoogleAuth />
     </AuthContainer>
   );
 }
