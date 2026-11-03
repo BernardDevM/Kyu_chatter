@@ -15,7 +15,7 @@ export class ListRoomsQueryDto extends PaginationQueryDto {
     return value;
   })
   @IsBoolean()
-  archived?: boolean;
+  isArchived?: boolean;
 
   /** Optional filter by room type (GROUP or DIRECT) */
   @IsOptional()

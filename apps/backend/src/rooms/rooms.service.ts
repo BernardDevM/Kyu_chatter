@@ -10,13 +10,14 @@ import {
   RoomType,
 } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PresenceService } from '../chat/presence.service.js';
 import type {
   MarkReadResponse,
   RoomDetailResponse,
   RoomMemberResponse,
   RoomPageResponse,
   RoomPreferenceResponse,
+  RoomPreferenceUpdateResponse,
+  RoomSummaryResponse,
 } from './dto/room.response.js';
 import type { CreateGroupRoomDto } from './dto/create-group-room.dto.js';
 import type { CreateDirectRoomDto } from './dto/create-direct-room.dto.js';
@@ -26,15 +27,28 @@ import type { AddMembersDto } from './dto/add-members.dto.js';
 import type { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
 import type { UpdateRoomPreferenceDto } from './dto/update-room-preference.dto.js';
 import type { MarkReadDto } from './dto/mark-read.dto.js';
-import type { MessageResponse } from '../messages/dto/message.response.js';
-import type { UserSummaryResponse } from '../users/dto/user.response.js';
+
+const USER_SUMMARY_SELECT = { id: true, name: true, image: true } as const;
+
+/** Relations needed to build a `RoomSummaryResponse` / `RoomDetailResponse`. */
+function roomInclude(userId: string) {
+  return {
+    preferences: { where: { userId } },
+    members: {
+      include: { user: { select: USER_SUMMARY_SELECT } },
+      orderBy: { joinedAt: 'asc' as const },
+    },
+    messages: {
+      take: 1,
+      orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+      select: { id: true, senderId: true, body: true, createdAt: true },
+    },
+  };
+}
 
 @Injectable()
 export class RoomsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly presenceService: PresenceService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Creates a new group chat room with members and assigns the creator OWNER role.
@@ -45,7 +59,7 @@ export class RoomsService {
   ): Promise<RoomDetailResponse> {
     // Remove duplicate IDs and prevent adding the creator twice.
     const uniqueMemberIds = Array.from(
-      new Set(dto.memberIds.filter((id) => id !== userId)),
+      new Set(dto.memberUserIds.filter((id) => id !== userId)),
     );
 
     // Validate that all requested members exist.
@@ -73,6 +87,19 @@ export class RoomsService {
     }
 
     // Create the group and all memberships atomically.
+    if (uniqueMemberIds.length === 0) {
+      throw new BadRequestException(
+        'memberUserIds must include at least one user other than yourself',
+      );
+    }
+
+    const existingUsers = await this.prisma.user.count({
+      where: { id: { in: uniqueMemberIds } },
+    });
+    if (existingUsers !== uniqueMemberIds.length) {
+      throw new BadRequestException('One or more invited users do not exist');
+    }
+
     const room = await this.prisma.room.create({
       data: {
         type: RoomType.GROUP,
@@ -93,33 +120,10 @@ export class RoomsService {
           ],
         },
       },
+      select: { id: true },
     });
 
-    return {
-      id: room.id,
-      type: RoomType.GROUP,
-      name: room.name,
-      description: room.description,
-      image: room.image,
-      lastMessage: null,
-      unreadCount: 0,
-      preference: {
-        isMuted: false,
-        isArchived: false,
-        isPinned: false,
-      },
-      preferences: {
-        isMuted: false,
-        isArchived: false,
-        isPinned: false,
-      },
-      directKey: null,
-      createdById: room.createdById,
-      createdAt: room.createdAt.toISOString(),
-      updatedAt: room.updatedAt.toISOString(),
-      myRole: MemberRole.OWNER,
-      memberCount: 1 + uniqueMemberIds.length,
-    };
+    return this.getRoom(userId, room.id);
   }
 
   /**
@@ -133,39 +137,23 @@ export class RoomsService {
       throw new BadRequestException(
         'Cannot create a direct room with yourself',
       );
+    if (userId === dto.targetUserId) {
+      throw new BadRequestException('Cannot create a direct room with yourself');
     }
 
     const otherUser = await this.prisma.user.findUnique({
-      where: { id: dto.userId },
-      select: { id: true, name: true, image: true },
+      where: { id: dto.targetUserId },
+      select: { id: true },
     });
     if (!otherUser) {
-      throw new NotFoundException(`User with ID ${dto.userId} not found`);
+      throw new NotFoundException(`User with ID ${dto.targetUserId} not found`);
     }
 
-    const directKey = [userId, dto.userId].sort().join(':');
+    const directKey = [userId, dto.targetUserId].sort().join(':');
 
     let room = await this.prisma.room.findUnique({
       where: { directKey },
-      include: {
-        members: {
-          include: {
-            user: { select: { id: true, name: true, image: true } },
-          },
-        },
-        preferences: {
-          where: { userId },
-        },
-        messages: {
-          take: 1,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          include: {
-            sender: { select: { id: true, name: true, image: true } },
-            attachments: { include: { media: true } },
-            reactions: true,
-          },
-        },
-      },
+      select: { id: true },
     });
 
     if (!room) {
@@ -251,41 +239,24 @@ export class RoomsService {
         if (!room) {
           throw error;
         }
+                { userId: dto.targetUserId, role: MemberRole.MEMBER },
+              ],
+            },
+          },
+          select: { id: true },
+        });
+      } catch (err: unknown) {
+        // A concurrent request created the same direct room first.
+        if ((err as { code?: string })?.code !== 'P2002') throw err;
+        room = await this.prisma.room.findUnique({
+          where: { directKey },
+          select: { id: true },
+        });
+        if (!room) throw err;
       }
     }
 
-    const myMember = room.members.find((m) => m.userId === userId);
-    const unreadCount = await this.calculateUnreadCount(
-      room.id,
-      userId,
-      myMember?.lastReadMessageId,
-      myMember?.joinedAt,
-    );
-
-    return {
-      id: room.id,
-      type: RoomType.DIRECT,
-      name: null,
-      description: null,
-      image: null,
-      lastMessage: room.messages[0]
-        ? this.mapMessageToResponse(room.messages[0], userId)
-        : null,
-      unreadCount,
-      preference: this.extractPreferences(room.preferences[0]),
-      preferences: this.extractPreferences(room.preferences[0]),
-      otherUser: {
-        id: otherUser.id,
-        name: otherUser.name,
-        image: otherUser.image,
-      },
-      directKey: room.directKey,
-      createdById: room.createdById,
-      createdAt: room.createdAt.toISOString(),
-      updatedAt: room.updatedAt.toISOString(),
-      myRole: myMember?.role ?? MemberRole.MEMBER,
-      memberCount: room.members.length,
-    };
+    return this.getRoom(userId, room.id);
   }
 
   /**
@@ -301,36 +272,16 @@ export class RoomsService {
         room: query.type ? { type: query.type } : undefined,
       },
       include: {
-        room: {
-          include: {
-            preferences: {
-              where: { userId },
-            },
-            members: {
-              include: {
-                user: { select: { id: true, name: true, image: true } },
-              },
-            },
-            messages: {
-              take: 1,
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-              include: {
-                sender: { select: { id: true, name: true, image: true } },
-                attachments: { include: { media: true } },
-                reactions: true,
-              },
-            },
-          },
-        },
+        room: { include: roomInclude(userId) },
       },
     });
 
     let filtered = memberships;
-    if (query.archived !== undefined) {
+    if (query.isArchived !== undefined) {
       filtered = filtered.filter((m) => {
         const pref = m.room.preferences[0];
         const isArchived = pref?.isArchived ?? false;
-        return isArchived === query.archived;
+        return isArchived === query.isArchived;
       });
     }
 
@@ -360,46 +311,7 @@ export class RoomsService {
       : null;
 
     const items = await Promise.all(
-      pageMemberships.map(async (m) => {
-        const room = m.room;
-        const unreadCount = await this.calculateUnreadCount(
-          room.id,
-          userId,
-          m.lastReadMessageId,
-          m.joinedAt,
-        );
-        const pref = this.extractPreferences(room.preferences[0]);
-        const lastMessage = room.messages[0]
-          ? this.mapMessageToResponse(room.messages[0], userId)
-          : null;
-
-        let otherUser: UserSummaryResponse | undefined;
-        if (room.type === RoomType.DIRECT) {
-          const partner = room.members.find((rm) => rm.userId !== userId);
-          if (partner) {
-            otherUser = {
-              id: partner.user.id,
-              name: partner.user.name,
-              image: partner.user.image,
-            };
-          }
-        }
-
-        return {
-          id: room.id,
-          type: room.type,
-          name: room.name,
-          description: room.description,
-          image: room.image,
-          memberCount: room.members.length,
-          lastMessage,
-          unreadCount,
-          preference: pref,
-          preferences: pref,
-          otherUser,
-          updatedAt: room.updatedAt.toISOString(),
-        };
-      }),
+      pageMemberships.map((m) => this.toRoomSummary(m.room, m, userId)),
     );
 
     return {
@@ -410,31 +322,13 @@ export class RoomsService {
   }
 
   /**
-   * Retrieves full details for a room if the caller is a member.
+   * Retrieves full details (including the member list) for a room if the caller is a member.
    */
   async getRoom(userId: string, roomId: string): Promise<RoomDetailResponse> {
     const member = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId } },
       include: {
-        room: {
-          include: {
-            preferences: { where: { userId } },
-            members: {
-              include: {
-                user: { select: { id: true, name: true, image: true } },
-              },
-            },
-            messages: {
-              take: 1,
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-              include: {
-                sender: { select: { id: true, name: true, image: true } },
-                attachments: { include: { media: true } },
-                reactions: true,
-              },
-            },
-          },
-        },
+        room: { include: roomInclude(userId) },
       },
     });
 
@@ -445,44 +339,11 @@ export class RoomsService {
     }
 
     const room = member.room;
-    const unreadCount = await this.calculateUnreadCount(
-      room.id,
-      userId,
-      member.lastReadMessageId,
-      member.joinedAt,
-    );
-
-    let otherUser: UserSummaryResponse | undefined;
-    if (room.type === RoomType.DIRECT) {
-      const partner = room.members.find((rm) => rm.userId !== userId);
-      if (partner) {
-        otherUser = {
-          id: partner.user.id,
-          name: partner.user.name,
-          image: partner.user.image,
-        };
-      }
-    }
+    const summary = await this.toRoomSummary(room, member, userId);
 
     return {
-      id: room.id,
-      type: room.type,
-      name: room.name,
-      description: room.description,
-      image: room.image,
-      lastMessage: room.messages[0]
-        ? this.mapMessageToResponse(room.messages[0], userId)
-        : null,
-      unreadCount,
-      preference: this.extractPreferences(room.preferences[0]),
-      preferences: this.extractPreferences(room.preferences[0]),
-      otherUser,
-      directKey: room.directKey,
-      createdById: room.createdById,
-      createdAt: room.createdAt.toISOString(),
-      updatedAt: room.updatedAt.toISOString(),
-      myRole: member.role,
-      memberCount: room.members.length,
+      ...summary,
+      members: room.members.map((m) => this.toMemberResponse(m)),
     };
   }
 
@@ -548,7 +409,7 @@ export class RoomsService {
   }
 
   /**
-   * Lists all members of a room with their roles and online status.
+   * Lists all members of a room with their roles.
    */
   async listMembers(
     userId: string,
@@ -563,30 +424,11 @@ export class RoomsService {
 
     const members = await this.prisma.roomMember.findMany({
       where: { roomId },
-      include: {
-        user: {
-          select: { id: true, name: true, image: true },
-        },
-      },
+      include: { user: { select: USER_SUMMARY_SELECT } },
       orderBy: { joinedAt: 'asc' },
     });
 
-    const targetUserIds = members.map((m) => m.userId);
-    const presenceRes = await this.presenceService.getPresence(
-      userId,
-      targetUserIds,
-    );
-
-    return members.map((m) => ({
-      user: {
-        id: m.user.id,
-        name: m.user.name,
-        image: m.user.image,
-      },
-      role: m.role,
-      joinedAt: m.joinedAt.toISOString(),
-      isOnline: presenceRes.presence[m.userId]?.online ?? false,
-    }));
+    return members.map((m) => this.toMemberResponse(m));
   }
 
   /**
@@ -642,7 +484,7 @@ export class RoomsService {
     // 4. Validate that every requested user exists.
     const users = await this.prisma.user.findMany({
       where: { id: { in: newIds } },
-      select: { id: true, name: true, image: true },
+      select: USER_SUMMARY_SELECT,
     });
 
     const foundIds = new Set(users.map((user) => user.id));
@@ -731,6 +573,15 @@ for (const user of users) {
       joinedAt: member.joinedAt.toISOString(),
       isOnline: presenceRes.presence[member.userId]?.online ?? false,
     }));
+    return users.map((u) =>
+      this.toMemberResponse({
+        roomId,
+        userId: u.id,
+        role: MemberRole.MEMBER,
+        joinedAt: now,
+        user: u,
+      }),
+    );
   }
 
   /**
@@ -774,25 +625,10 @@ for (const user of users) {
     const updated = await this.prisma.roomMember.update({
       where: { roomId_userId: { roomId, userId: targetUserId } },
       data: { role: dto.role },
-      include: {
-        user: { select: { id: true, name: true, image: true } },
-      },
+      include: { user: { select: USER_SUMMARY_SELECT } },
     });
 
-    const presenceRes = await this.presenceService.getPresence(userId, [
-      targetUserId,
-    ]);
-
-    return {
-      user: {
-        id: updated.user.id,
-        name: updated.user.name,
-        image: updated.user.image,
-      },
-      role: updated.role,
-      joinedAt: updated.joinedAt.toISOString(),
-      isOnline: presenceRes.presence[targetUserId]?.online ?? false,
-    };
+    return this.toMemberResponse(updated);
   }
 
   /**
@@ -862,7 +698,7 @@ for (const user of users) {
     userId: string,
     roomId: string,
     dto: UpdateRoomPreferenceDto,
-  ): Promise<RoomPreferenceResponse> {
+  ): Promise<RoomPreferenceUpdateResponse> {
     const member = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId } },
     });
@@ -889,6 +725,8 @@ for (const user of users) {
     });
 
     return {
+      roomId,
+      userId,
       isMuted: pref.isMuted,
       isArchived: pref.isArchived,
       isPinned: pref.isPinned,
@@ -896,7 +734,7 @@ for (const user of users) {
   }
 
   /**
-   * Updates the user's read cursor up to messageId and returns the remaining unread count.
+   * Updates the user's read cursor up to messageId and records a READ receipt.
    */
   async markRead(
     userId: string,
@@ -968,11 +806,32 @@ for (const user of users) {
       effectiveCursorId,
       member.joinedAt,
     );
+    const readAt = new Date();
+
+    await this.prisma.roomMember.update({
+      where: { roomId_userId: { roomId, userId } },
+      data: { lastReadMessageId: dto.messageId },
+    });
+
+    await this.prisma.messageReceipt.upsert({
+      where: { messageId_userId: { messageId: dto.messageId, userId } },
+      update: {
+        status: ReceiptStatus.READ,
+        readAt,
+      },
+      create: {
+        messageId: dto.messageId,
+        userId,
+        status: ReceiptStatus.READ,
+        readAt,
+      },
+    });
 
     return {
       roomId,
+      userId,
       lastReadMessageId: dto.messageId,
-      unreadCount,
+      readAt: readAt.toISOString(),
     };
   }
 
@@ -991,6 +850,79 @@ for (const user of users) {
       isMuted: pref?.isMuted ?? false,
       isArchived: pref?.isArchived ?? false,
       isPinned: pref?.isPinned ?? false,
+    };
+  }
+
+  private toMemberResponse(m: {
+    roomId: string;
+    userId: string;
+    role: MemberRole;
+    joinedAt: Date;
+    user: { id: string; name: string; image: string | null };
+  }): RoomMemberResponse {
+    return {
+      roomId: m.roomId,
+      userId: m.userId,
+      role: m.role,
+      joinedAt: m.joinedAt.toISOString(),
+      user: {
+        id: m.user.id,
+        name: m.user.name,
+        image: m.user.image,
+      },
+    };
+  }
+
+  private async toRoomSummary(
+    room: {
+      id: string;
+      type: RoomType;
+      name: string | null;
+      description: string | null;
+      image: string | null;
+      updatedAt: Date;
+      members: unknown[];
+      preferences: Array<{
+        isMuted: boolean;
+        isArchived: boolean;
+        isPinned: boolean;
+      }>;
+      messages: Array<{
+        id: string;
+        senderId: string;
+        body: string | null;
+        createdAt: Date;
+      }>;
+    },
+    membership: { lastReadMessageId: string | null; joinedAt: Date },
+    userId: string,
+  ): Promise<RoomSummaryResponse> {
+    const unreadCount = await this.calculateUnreadCount(
+      room.id,
+      userId,
+      membership.lastReadMessageId,
+      membership.joinedAt,
+    );
+    const last = room.messages[0];
+
+    return {
+      id: room.id,
+      type: room.type,
+      name: room.name,
+      description: room.description,
+      image: room.image,
+      memberCount: room.members.length,
+      lastMessage: last
+        ? {
+            id: last.id,
+            senderId: last.senderId,
+            body: last.body,
+            createdAt: last.createdAt.toISOString(),
+          }
+        : null,
+      unreadCount,
+      preference: this.extractPreferences(room.preferences[0]),
+      updatedAt: room.updatedAt.toISOString(),
     };
   }
 
@@ -1047,52 +979,5 @@ for (const user of users) {
         ],
       },
     });
-  }
-
-  private mapMessageToResponse(
-    msg: any,
-    _currentUserId: string,
-  ): MessageResponse {
-    return {
-      id: msg.id,
-      roomId: msg.roomId,
-      senderId: msg.senderId ?? msg.sender?.id,
-      sender: {
-        id: msg.sender.id,
-        name: msg.sender.name,
-        image: msg.sender.image,
-      },
-      clientMessageId: msg.clientMessageId,
-      body: msg.body,
-      replyToId: msg.replyToId ?? (msg.replyTo ? msg.replyTo.id : null),
-      replyTo: msg.replyTo
-        ? {
-            id: msg.replyTo.id,
-            body: msg.replyTo.body,
-            senderName: msg.replyTo.sender?.name ?? 'Unknown',
-          }
-        : null,
-      attachments: (msg.attachments ?? []).map((att: any) => ({
-        id: att.id,
-        media: {
-          id: att.media.id,
-          kind: att.media.kind,
-          status: att.media.status,
-          url: att.media.url,
-          originalName: att.media.originalName,
-          mimeType: att.media.mimeType,
-          bytes: Number(att.media.bytes),
-          width: att.media.width,
-          height: att.media.height,
-          duration: att.media.duration,
-          createdAt: att.media.createdAt.toISOString(),
-        },
-      })),
-      reactions: [],
-      nodeId: msg.nodeId,
-      createdAt: msg.createdAt.toISOString(),
-      editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
-      deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null,
-    };
   }
 }

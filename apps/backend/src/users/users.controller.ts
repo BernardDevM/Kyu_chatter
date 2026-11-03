@@ -76,9 +76,8 @@ export class UsersController {
   @ApiOperation({ summary: 'Get public user profile by ID' })
   @Get(':id')
   async getUserProfile(
-    @CurrentUser('id') userId: string,
     @Param() params: UserIdParamDto,
   ): Promise<UserProfileResponse> {
-    return this.usersService.getUserProfile(userId, params.id);
+    return this.usersService.getUserProfile(params.id);
   }
 }

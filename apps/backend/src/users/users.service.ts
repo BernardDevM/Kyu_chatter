@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PresenceService } from '../chat/presence.service.js';
 import type {
   MeResponse,
   UserProfileResponse,
@@ -11,10 +10,7 @@ import type { SearchUsersQueryDto } from './dto/search-users-query.dto.js';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly presenceService: PresenceService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Retrieves the authenticated user's private profile.
@@ -27,19 +23,7 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    const presenceRes = await this.presenceService.getPresence(userId, [userId]);
-    const isOnline = presenceRes.presence[userId]?.online ?? true;
-
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      emailVerified: user.emailVerified,
-      image: user.image,
-      lastSeenAt: user.lastSeenAt ? user.lastSeenAt.toISOString() : null,
-      isOnline,
-      createdAt: user.createdAt.toISOString(),
-    };
+    return this.toMeResponse(user);
   }
 
   /**
@@ -61,16 +45,7 @@ export class UsersService {
       },
     });
 
-    return {
-      id: updatedUser.id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      emailVerified: updatedUser.emailVerified,
-      image: updatedUser.image,
-      lastSeenAt: updatedUser.lastSeenAt ? updatedUser.lastSeenAt.toISOString() : null,
-      isOnline: true,
-      createdAt: updatedUser.createdAt.toISOString(),
-    };
+    return this.toMeResponse(updatedUser);
   }
 
   /**
@@ -114,38 +89,43 @@ export class UsersService {
   }
 
   /**
-   * Retrieves public profile and activity status for a specific user ID.
+   * Retrieves the public profile for a specific user ID.
    */
-  async getUserProfile(
-    userId: string,
-    targetUserId: string,
-  ): Promise<UserProfileResponse> {
+  async getUserProfile(targetUserId: string): Promise<UserProfileResponse> {
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: {
         id: true,
         name: true,
         image: true,
-        lastSeenAt: true,
+        createdAt: true,
       },
     });
     if (!user) {
       throw new NotFoundException(`User with ID ${targetUserId} not found`);
     }
 
-    const presenceRes = await this.presenceService.getPresence(userId, [targetUserId]);
-    const targetPresence = presenceRes.presence[targetUserId];
-    const isOnline = targetPresence?.online ?? false;
-    const lastSeenAt =
-      targetPresence?.lastSeenAt ??
-      (user.lastSeenAt ? user.lastSeenAt.toISOString() : null);
-
     return {
       id: user.id,
       name: user.name,
       image: user.image,
-      lastSeenAt,
-      isOnline,
+      createdAt: user.createdAt.toISOString(),
+    };
+  }
+
+  private toMeResponse(user: {
+    id: string;
+    email: string;
+    name: string;
+    image: string | null;
+    createdAt: Date;
+  }): MeResponse {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      createdAt: user.createdAt.toISOString(),
     };
   }
 }

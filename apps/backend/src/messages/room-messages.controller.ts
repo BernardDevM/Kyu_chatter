@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Optional,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +23,8 @@ import { MessagesService } from './messages.service.js';
 import { SyncMessagesQueryDto } from './dto/sync-messages-query.dto.js';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto.js';
 import { SendMessageDto } from './dto/send-message.dto.js';
+import { WS_SERVER_EVENTS } from '../chat/chat.events.js';
+import { RealtimeEmitter } from '../realtime/realtime-emitter.service.js';
 import type {
   MessagePageResponse,
   MessageResponse,
@@ -33,7 +36,10 @@ import type {
 @UseGuards(RoomMemberGuard)
 @Controller('api/rooms/:roomId/messages')
 export class RoomMessagesController {
-  constructor(private readonly messagesService: MessagesService) {}
+  constructor(
+    private readonly messagesService: MessagesService,
+    @Optional() private readonly realtime?: RealtimeEmitter,
+  ) {}
 
   /**
    * Resynchronizes messages created after a given message ID (oldest first).
@@ -45,7 +51,7 @@ export class RoomMessagesController {
     @CurrentUser('id') userId: string,
     @Param() params: RoomIdParamDto,
     @Query() query: SyncMessagesQueryDto,
-  ): Promise<MessageResponse[]> {
+  ): Promise<MessagePageResponse> {
     return this.messagesService.syncMessages(userId, params.roomId, query);
   }
 
@@ -73,6 +79,10 @@ export class RoomMessagesController {
     @Param() params: RoomIdParamDto,
     @Body() dto: SendMessageDto,
   ): Promise<MessageResponse> {
-    return this.messagesService.sendMessage(userId, params.roomId, dto);
+    const message = await this.messagesService.sendMessage(userId, params.roomId, dto);
+    // Same broadcast the WebSocket `message:send` handler performs. Clients de-duplicate
+    // on `clientMessageId`, so a retried (idempotent) send is harmless.
+    this.realtime?.toRoom(params.roomId, WS_SERVER_EVENTS.MESSAGE_NEW, message);
+    return message;
   }
 }

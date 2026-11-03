@@ -14,11 +14,11 @@ import { trimString } from '../../common/dto/trim-string.js';
  * Requires at least one field (name, description, or image) to be provided.
  */
 export class UpdateRoomDto {
-  /** Updated room name (1-80 characters) */
+  /** Updated room name (1-100 characters) */
   @ValidateIf((o: UpdateRoomDto) => (!o.description && !o.image) || o.name !== undefined)
   @IsNotEmpty({ message: 'At least one of [name, description, image] must be provided' })
   @IsString()
-  @Length(1, 80)
+  @Length(1, 100)
   @Transform(trimString)
   name?: string;
 
@@ -32,7 +32,7 @@ export class UpdateRoomDto {
   /** Updated room avatar URL (max 2048 characters) */
   @ValidateIf((o: UpdateRoomDto) => o.image !== undefined)
   @IsString()
-  @IsUrl({ protocols: ['https', 'http'], require_tld: false })
+  @IsUrl({ protocols: ['https'], require_tld: false })
   @MaxLength(2048)
   @Transform(trimString)
   image?: string;

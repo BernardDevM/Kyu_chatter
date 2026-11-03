@@ -34,10 +34,10 @@ describe('SendMessageDto', () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  it('fails validation when body exceeds 2000 characters', async () => {
+  it('fails validation when body exceeds 4000 characters', async () => {
     const dto = plainToInstance(SendMessageDto, {
       clientMessageId: validUuid,
-      body: 'x'.repeat(2001),
+      body: 'x'.repeat(4001),
     });
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);

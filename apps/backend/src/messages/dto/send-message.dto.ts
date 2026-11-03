@@ -22,7 +22,7 @@ export class SendMessageDto {
   @IsUUID('all')
   clientMessageId!: string;
 
-  /** Message text content (1-2000 characters, trimmed) */
+  /** Message text content (1-4000 characters, trimmed) */
   @ValidateIf(
     (o: SendMessageDto) =>
       !o.mediaIds || o.mediaIds.length === 0 || o.body !== undefined,
@@ -31,7 +31,7 @@ export class SendMessageDto {
     message: 'body must not be empty when mediaIds is not provided',
   })
   @IsString()
-  @Length(1, 2000)
+  @Length(1, 4000)
   @Transform(trimString)
   body?: string;
 

@@ -10,7 +10,7 @@ describe('CreateGroupRoomDto', () => {
       name: 'Engineering Team',
       description: 'Discussing system design',
       image: 'https://example.com/team.jpg',
-      memberIds: ['usr_1', 'usr_2'],
+      memberUserIds: ['usr_1', 'usr_2'],
     });
     const errors = await validate(dto);
     expect(errors.length).toBe(0);
@@ -19,30 +19,30 @@ describe('CreateGroupRoomDto', () => {
   it('fails validation when name is empty', async () => {
     const dto = plainToInstance(CreateGroupRoomDto, {
       name: '   ',
-      memberIds: ['usr_1'],
+      memberUserIds: ['usr_1'],
     });
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.property === 'name')).toBe(true);
   });
 
-  it('fails validation when memberIds is empty', async () => {
+  it('fails validation when memberUserIds is empty', async () => {
     const dto = plainToInstance(CreateGroupRoomDto, {
       name: 'General',
-      memberIds: [],
+      memberUserIds: [],
     });
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.property === 'memberIds')).toBe(true);
+    expect(errors.some((e) => e.property === 'memberUserIds')).toBe(true);
   });
 
-  it('fails validation when memberIds contains duplicates', async () => {
+  it('fails validation when memberUserIds contains duplicates', async () => {
     const dto = plainToInstance(CreateGroupRoomDto, {
       name: 'General',
-      memberIds: ['usr_1', 'usr_1'],
+      memberUserIds: ['usr_1', 'usr_1'],
     });
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.property === 'memberIds')).toBe(true);
+    expect(errors.some((e) => e.property === 'memberUserIds')).toBe(true);
   });
 });

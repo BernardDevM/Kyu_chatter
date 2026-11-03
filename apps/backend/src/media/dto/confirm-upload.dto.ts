@@ -2,36 +2,36 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
+  Length,
   Min,
 } from 'class-validator';
 import { trimString } from '../../common/dto/trim-string.js';
 
 /**
- * Payload confirming a completed direct upload to Cloudinary.
+ * Payload confirming a completed direct upload (docs/API.md §7.2).
  */
 export class ConfirmUploadDto {
-  /** Cloudinary storage public ID */
+  /** Media UUID returned by the signature request */
+  @IsUUID('all')
+  mediaId!: string;
+
+  /** Storage key (Cloudinary public ID) returned by the signature request (1-512 chars) */
   @IsString()
   @IsNotEmpty()
+  @Length(1, 512)
   @Transform(trimString)
-  publicId!: string;
+  storageKey!: string;
 
-  /** Final secure HTTPS URL of the asset */
+  /** Final secure HTTPS URL of the uploaded asset */
   @IsString()
   @IsNotEmpty()
   @IsUrl({ protocols: ['https'], require_tld: false })
   @Transform(trimString)
   url!: string;
-
-  /** Total uploaded file size in bytes */
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  bytes!: number;
 
   /** Optional width in pixels (for images/videos) */
   @IsOptional()
@@ -47,10 +47,10 @@ export class ConfirmUploadDto {
   @Min(1)
   height?: number;
 
-  /** Optional duration in seconds (for audio/video) */
+  /** Optional duration in whole seconds (for audio/video) */
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsInt()
+  @Min(1)
   duration?: number;
 }

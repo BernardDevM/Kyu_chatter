@@ -6,15 +6,32 @@ import {
 } from '@nestjs/common';
 import { RoomsService } from './rooms.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PresenceService } from '../chat/presence.service.js';
 import { MemberRole, RoomType } from '../generated/prisma/enums.js';
 
 describe('RoomsService', () => {
   let service: RoomsService;
   let prismaMock: any;
-  let presenceMock: any;
 
   const now = new Date('2026-01-01T00:00:00.000Z');
+
+  /** A `roomMember.findUnique` result (with room) as consumed by `getRoom`. */
+  const membershipWithRoom = (room: Record<string, unknown>, role = MemberRole.OWNER) => ({
+    roomId: room.id,
+    userId: 'user_1',
+    role,
+    lastReadMessageId: null,
+    joinedAt: now,
+    room: {
+      description: null,
+      image: null,
+      name: null,
+      updatedAt: now,
+      preferences: [],
+      messages: [],
+      members: [],
+      ...room,
+    },
+  });
 
   beforeEach(async () => {
     prismaMock = {
@@ -37,6 +54,7 @@ describe('RoomsService', () => {
         upsert: vi.fn(),
       },
       user: {
+        count: vi.fn(),
         findUnique: vi.fn(),
         findMany: vi.fn(),
       },
@@ -49,20 +67,10 @@ describe('RoomsService', () => {
       },
     };
 
-    presenceMock = {
-      getPresence: vi.fn().mockResolvedValue({
-        presence: {
-          user_1: { online: true, lastSeenAt: null },
-          user_2: { online: false, lastSeenAt: now.toISOString() },
-        },
-      }),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RoomsService,
         { provide: PrismaService, useValue: prismaMock },
-        { provide: PresenceService, useValue: presenceMock },
       ],
     }).compile();
 
@@ -74,22 +82,27 @@ describe('RoomsService', () => {
   });
 
   describe('createGroupRoom', () => {
-    it('creates a group room and assigns creator as OWNER', async () => {
-      prismaMock.room.create.mockResolvedValue({
-        id: 'room_1',
-        type: RoomType.GROUP,
-        name: 'Cool Group',
-        description: 'A test group',
-        image: null,
-        createdById: 'user_1',
-        createdAt: now,
-        updatedAt: now,
-      });
+    it('creates a group room, assigns creator as OWNER and returns detail with members', async () => {
+      prismaMock.user.count.mockResolvedValue(2);
+      prismaMock.room.create.mockResolvedValue({ id: 'room_1' });
+      prismaMock.roomMember.findUnique.mockResolvedValue(
+        membershipWithRoom({
+          id: 'room_1',
+          type: RoomType.GROUP,
+          name: 'Cool Group',
+          description: 'A test group',
+          members: [
+            { roomId: 'room_1', userId: 'user_1', role: MemberRole.OWNER, joinedAt: now, user: { id: 'user_1', name: 'Alice', image: null } },
+            { roomId: 'room_1', userId: 'user_2', role: MemberRole.MEMBER, joinedAt: now, user: { id: 'user_2', name: 'Bob', image: null } },
+            { roomId: 'room_1', userId: 'user_3', role: MemberRole.MEMBER, joinedAt: now, user: { id: 'user_3', name: 'Cy', image: null } },
+          ],
+        }),
+      );
 
       const res = await service.createGroupRoom('user_1', {
         name: 'Cool Group',
         description: 'A test group',
-        memberIds: ['user_2', 'user_3'],
+        memberUserIds: ['user_2', 'user_3'],
       });
 
       expect(prismaMock.room.create).toHaveBeenCalledWith({
@@ -107,82 +120,79 @@ describe('RoomsService', () => {
             ],
           },
         },
+        select: { id: true },
       });
       expect(res.id).toBe('room_1');
-      expect(res.myRole).toBe(MemberRole.OWNER);
       expect(res.memberCount).toBe(3);
+      expect(res.members).toHaveLength(3);
+      expect(res.members[0]).toEqual({
+        roomId: 'room_1',
+        userId: 'user_1',
+        role: MemberRole.OWNER,
+        joinedAt: now.toISOString(),
+        user: { id: 'user_1', name: 'Alice', image: null },
+      });
+      expect(res.preference).toEqual({ isMuted: false, isArchived: false, isPinned: false });
+    });
+
+    it('throws BadRequestException when an invited user does not exist', async () => {
+      prismaMock.user.count.mockResolvedValue(1);
+
+      await expect(
+        service.createGroupRoom('user_1', { name: 'G', memberUserIds: ['user_2', 'ghost'] }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prismaMock.room.create).not.toHaveBeenCalled();
     });
   });
 
   describe('createDirectRoom', () => {
+    const directRoom = (extra: Record<string, unknown> = {}) =>
+      membershipWithRoom(
+        {
+          id: 'room_direct_1',
+          type: RoomType.DIRECT,
+          directKey: 'user_1:user_2',
+          members: [
+            { roomId: 'room_direct_1', userId: 'user_1', role: MemberRole.MEMBER, joinedAt: now, user: { id: 'user_1', name: 'Alice', image: null } },
+            { roomId: 'room_direct_1', userId: 'user_2', role: MemberRole.MEMBER, joinedAt: now, user: { id: 'user_2', name: 'Bob', image: null } },
+          ],
+          ...extra,
+        },
+        MemberRole.MEMBER,
+      );
+
     it('throws BadRequestException when creating a direct room with self', async () => {
       await expect(
-        service.createDirectRoom('user_1', { userId: 'user_1' }),
+        service.createDirectRoom('user_1', { targetUserId: 'user_1' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('creates a new direct room when none exists', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
-        id: 'user_2',
-        name: 'Bob',
-        image: null,
-      });
+      prismaMock.user.findUnique.mockResolvedValue({ id: 'user_2' });
       prismaMock.room.findUnique.mockResolvedValue(null);
+      prismaMock.room.create.mockResolvedValue({ id: 'room_direct_1' });
+      prismaMock.roomMember.findUnique.mockResolvedValue(directRoom());
 
-      const createdRoom = {
-        id: 'room_direct_1',
-        type: RoomType.DIRECT,
-        directKey: 'user_1:user_2',
-        createdById: 'user_1',
-        createdAt: now,
-        updatedAt: now,
-        members: [
-          { userId: 'user_1', role: MemberRole.MEMBER, user: { id: 'user_1', name: 'Alice', image: null } },
-          { userId: 'user_2', role: MemberRole.MEMBER, user: { id: 'user_2', name: 'Bob', image: null } },
-        ],
-        preferences: [],
-        messages: [],
-      };
+      const res = await service.createDirectRoom('user_1', { targetUserId: 'user_2' });
 
-      prismaMock.room.create.mockResolvedValue(createdRoom);
-      prismaMock.room.findUniqueOrThrow.mockResolvedValue(createdRoom);
-
-      const res = await service.createDirectRoom('user_1', { userId: 'user_2' });
-
+      expect(prismaMock.room.create).toHaveBeenCalled();
       expect(res.type).toBe(RoomType.DIRECT);
-      expect(res.otherUser?.id).toBe('user_2');
-      expect(res.directKey).toBe('user_1:user_2');
+      expect(res.memberCount).toBe(2);
+      expect(res.members.map((m) => m.userId)).toEqual(['user_1', 'user_2']);
     });
 
     it('returns existing direct room if one already exists', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
-        id: 'user_2',
-        name: 'Bob',
-        image: null,
-      });
+      prismaMock.user.findUnique.mockResolvedValue({ id: 'user_2' });
+      prismaMock.room.findUnique.mockResolvedValue({ id: 'room_direct_1' });
+      prismaMock.roomMember.findUnique.mockResolvedValue(
+        directRoom({ preferences: [{ isMuted: true, isArchived: false, isPinned: true }] }),
+      );
 
-      const existingRoom = {
-        id: 'room_direct_existing',
-        type: RoomType.DIRECT,
-        directKey: 'user_1:user_2',
-        createdById: 'user_1',
-        createdAt: now,
-        updatedAt: now,
-        members: [
-          { userId: 'user_1', role: MemberRole.MEMBER, user: { id: 'user_1', name: 'Alice', image: null } },
-          { userId: 'user_2', role: MemberRole.MEMBER, user: { id: 'user_2', name: 'Bob', image: null } },
-        ],
-        preferences: [{ isMuted: true, isArchived: false, isPinned: true }],
-        messages: [],
-      };
-
-      prismaMock.room.findUnique.mockResolvedValue(existingRoom);
-
-      const res = await service.createDirectRoom('user_1', { userId: 'user_2' });
+      const res = await service.createDirectRoom('user_1', { targetUserId: 'user_2' });
 
       expect(prismaMock.room.create).not.toHaveBeenCalled();
-      expect(res.id).toBe('room_direct_existing');
-      expect(res.preferences.isPinned).toBe(true);
+      expect(res.id).toBe('room_direct_1');
+      expect(res.preference.isPinned).toBe(true);
     });
   });
 
@@ -202,7 +212,9 @@ describe('RoomsService', () => {
             updatedAt: now,
             preferences: [{ isPinned: false, isArchived: false, isMuted: false }],
             members: [],
-            messages: [],
+            messages: [
+              { id: 'msg_1', senderId: 'user_2', body: 'hi', createdAt: now },
+            ],
           },
         },
       ]);
@@ -211,40 +223,69 @@ describe('RoomsService', () => {
 
       expect(res.items).toHaveLength(1);
       expect(res.items[0]!.id).toBe('room_1');
+      expect(res.items[0]!.lastMessage).toEqual({
+        id: 'msg_1',
+        senderId: 'user_2',
+        body: 'hi',
+        createdAt: now.toISOString(),
+      });
+      expect(res.items[0]!.preference).toEqual({ isMuted: false, isArchived: false, isPinned: false });
+      expect(res.items[0]).not.toHaveProperty('preferences');
       expect(res.nextCursor).toBeNull();
+    });
+
+    it('filters by isArchived', async () => {
+      const room = (id: string, isArchived: boolean) => ({
+        userId: 'user_1',
+        lastReadMessageId: null,
+        joinedAt: now,
+        room: {
+          id,
+          type: RoomType.GROUP,
+          name: id,
+          description: null,
+          image: null,
+          updatedAt: now,
+          preferences: [{ isPinned: false, isArchived, isMuted: false }],
+          members: [],
+          messages: [],
+        },
+      });
+      prismaMock.roomMember.findMany.mockResolvedValue([room('a', false), room('b', true)]);
+
+      const res = await service.listRooms('user_1', { isArchived: true });
+
+      expect(res.items.map((r) => r.id)).toEqual(['b']);
     });
   });
 
   describe('getRoom', () => {
-    it('retrieves room details for member', async () => {
-      prismaMock.roomMember.findUnique.mockResolvedValue({
-        userId: 'user_1',
-        role: MemberRole.OWNER,
-        lastReadMessageId: null,
-        joinedAt: now,
-        room: {
+    it('retrieves room details including members for a member', async () => {
+      prismaMock.roomMember.findUnique.mockResolvedValue(
+        membershipWithRoom({
           id: 'room_1',
           type: RoomType.GROUP,
           name: 'General',
           description: 'Official',
-          image: null,
-          directKey: null,
-          createdById: 'user_1',
-          createdAt: now,
-          updatedAt: now,
-          preferences: [],
           members: [
-            { userId: 'user_1', user: { id: 'user_1', name: 'Alice', image: null } },
+            { roomId: 'room_1', userId: 'user_1', role: MemberRole.OWNER, joinedAt: now, user: { id: 'user_1', name: 'Alice', image: null } },
           ],
-          messages: [],
-        },
-      });
+        }),
+      );
 
       const res = await service.getRoom('user_1', 'room_1');
 
       expect(res.id).toBe('room_1');
-      expect(res.myRole).toBe(MemberRole.OWNER);
       expect(res.memberCount).toBe(1);
+      expect(res.members).toEqual([
+        {
+          roomId: 'room_1',
+          userId: 'user_1',
+          role: MemberRole.OWNER,
+          joinedAt: now.toISOString(),
+          user: { id: 'user_1', name: 'Alice', image: null },
+        },
+      ]);
     });
 
     it('throws NotFoundException if user is not member of the room', async () => {
@@ -272,15 +313,12 @@ describe('RoomsService', () => {
         name: 'Updated Name',
         description: null,
         image: null,
+        memberCount: 1,
         lastMessage: null,
         unreadCount: 0,
-        preferences: { isMuted: false, isArchived: false, isPinned: false },
-        directKey: null,
-        createdById: 'user_1',
-        createdAt: now.toISOString(),
+        preference: { isMuted: false, isArchived: false, isPinned: false },
         updatedAt: now.toISOString(),
-        myRole: MemberRole.OWNER,
-        memberCount: 1,
+        members: [],
       });
 
       const res = await service.updateRoom('user_1', 'room_1', {
@@ -337,18 +375,20 @@ describe('RoomsService', () => {
   });
 
   describe('member management', () => {
-    it('listMembers returns members with presence status', async () => {
+    it('listMembers returns members in API shape', async () => {
       prismaMock.roomMember.findUnique.mockResolvedValue({
         userId: 'user_1',
       });
       prismaMock.roomMember.findMany.mockResolvedValue([
         {
+          roomId: 'room_1',
           userId: 'user_1',
           role: MemberRole.OWNER,
           joinedAt: now,
           user: { id: 'user_1', name: 'Alice', image: null },
         },
         {
+          roomId: 'room_1',
           userId: 'user_2',
           role: MemberRole.MEMBER,
           joinedAt: now,
@@ -359,10 +399,15 @@ describe('RoomsService', () => {
       const res = await service.listMembers('user_1', 'room_1');
 
       expect(res).toHaveLength(2);
-      expect(res[0]!.user.name).toBe('Alice');
-      expect(res[0]!.isOnline).toBe(true);
+      expect(res[0]).toEqual({
+        roomId: 'room_1',
+        userId: 'user_1',
+        role: MemberRole.OWNER,
+        joinedAt: now.toISOString(),
+        user: { id: 'user_1', name: 'Alice', image: null },
+      });
       expect(res[1]!.user.name).toBe('Bob');
-      expect(res[1]!.isOnline).toBe(false);
+      expect(res[1]).not.toHaveProperty('isOnline');
     });
 
     it('addMembers adds new users into group room', async () => {
@@ -384,7 +429,12 @@ describe('RoomsService', () => {
 
       expect(prismaMock.roomMember.createMany).toHaveBeenCalled();
       expect(res).toHaveLength(1);
-      expect(res[0]!.user.id).toBe('user_2');
+      expect(res[0]).toMatchObject({
+        roomId: 'room_1',
+        userId: 'user_2',
+        role: MemberRole.MEMBER,
+        user: { id: 'user_2', name: 'Bob', image: null },
+      });
     });
 
     it('updateMemberRole updates role of another member', async () => {
@@ -400,6 +450,7 @@ describe('RoomsService', () => {
         });
 
       prismaMock.roomMember.update.mockResolvedValue({
+        roomId: 'room_1',
         userId: 'user_2',
         role: MemberRole.ADMIN,
         joinedAt: now,
@@ -414,6 +465,8 @@ describe('RoomsService', () => {
       );
 
       expect(res.role).toBe(MemberRole.ADMIN);
+      expect(res.userId).toBe('user_2');
+      expect(res.roomId).toBe('room_1');
     });
 
     it('removeMember prevents removing the OWNER', async () => {
@@ -449,6 +502,8 @@ describe('RoomsService', () => {
       });
 
       expect(res).toEqual({
+        roomId: 'room_1',
+        userId: 'user_1',
         isMuted: true,
         isArchived: false,
         isPinned: true,
@@ -472,8 +527,11 @@ describe('RoomsService', () => {
         data: { lastReadMessageId: 'msg_1' },
       });
       expect(prismaMock.messageReceipt.upsert).toHaveBeenCalled();
+      expect(res.roomId).toBe('room_1');
+      expect(res.userId).toBe('user_1');
       expect(res.lastReadMessageId).toBe('msg_1');
-      expect(res.unreadCount).toBe(0);
+      expect(typeof res.readAt).toBe('string');
+      expect(Number.isNaN(Date.parse(res.readAt))).toBe(false);
     });
   });
 });

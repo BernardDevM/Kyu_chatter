@@ -9,11 +9,11 @@ export class SyncMessagesQueryDto {
   @IsUUID('all')
   afterId!: string;
 
-  /** Maximum number of messages to resync (1-200, default 100) */
+  /** Maximum number of messages to resync (1-100, default 50) */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
-  limit?: number = 100;
+  @Max(100)
+  limit?: number = 50;
 }

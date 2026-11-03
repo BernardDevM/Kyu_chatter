@@ -6,10 +6,10 @@ import { trimString } from '../../common/dto/trim-string.js';
  * Payload for editing the body of an existing message.
  */
 export class EditMessageDto {
-  /** Updated message text content (1-2000 characters) */
+  /** Updated message text content (1-4000 characters) */
   @IsString()
   @IsNotEmpty()
-  @Length(1, 2000)
+  @Length(1, 4000)
   @Transform(trimString)
   body!: string;
 }
