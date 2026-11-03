@@ -126,7 +126,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ## 4. Users Endpoints (`/api/users`)
 
-### 3.1 Get Current User
+### 4.1 Get Current User
 - **Method / Path**: `GET /api/users/me`
 - **Auth**: Required
 - **Response**: `200 OK`
@@ -140,7 +140,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 }
 ```
 
-### 3.2 Update Current User Profile
+### 4.2 Update Current User Profile
 - **Method / Path**: `PATCH /api/users/me`
 - **Auth**: Required
 - **Request Body** (`UpdateProfileDto` - at least one field required):
@@ -148,7 +148,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
   - `image`: `string` (optional, valid HTTPS URL, max 2048 chars)
 - **Response**: `200 OK` (returns updated `UserProfileResponse`)
 
-### 3.3 Search Users
+### 4.3 Search Users
 - **Method / Path**: `GET /api/users/search?q=...&limit=...`
 - **Auth**: Required
 - **Query Parameters** (`SearchUsersQueryDto`):
@@ -165,7 +165,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 ]
 ```
 
-### 3.4 Get User Profile by ID
+### 4.4 Get User Profile by ID
 - **Method / Path**: `GET /api/users/:id`
 - **Auth**: Required
 - **Path Parameters**: `id` (`string`, 1-64 chars)
@@ -183,7 +183,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ## 5. Presence Endpoints (`/api/presence`)
 
-### 4.1 Batch Query Presence
+### 5.1 Batch Query Presence
 - **Method / Path**: `GET /api/presence?userIds=usr_1,usr_2`
 - **Auth**: Required
 - **Query Parameters** (`PresenceQueryDto`):
@@ -205,17 +205,17 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 ## 6. Rooms Endpoints (`/api/rooms`)
 
-### 5.1 Create Group Room
+### 6.1 Create Group Room
 - **Method / Path**: `POST /api/rooms`
 - **Auth**: Required
 - **Request Body** (`CreateGroupRoomDto`):
-  - `name`: `string` (required, 1-100 chars)
+  - `name`: `string` (required, 1-80 chars)
   - `description`: `string` (optional, max 500 chars)
   - `image`: `string` (optional, HTTPS URL, max 2048 chars)
-  - `memberUserIds`: `string[]` (required, array of 1-99 user IDs to invite)
+  - `memberIds`: `string[]` (required, array of 1-100 user IDs to invite)
 - **Response**: `201 Created` (`RoomDetailResponse`)
 
-### 5.2 Create or Get Direct Message Room
+### 6.2 Create or Get Direct Message Room
 - **Method / Path**: `POST /api/rooms/direct`
 - **Auth**: Required
 - **Request Body** (`CreateDirectRoomDto`):
@@ -223,7 +223,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 - **Response**: `200 OK` (`RoomDetailResponse`)
 - **Note**: Idempotent. Returns existing direct room between current user and target user if already created.
 
-### 5.3 List Joined Rooms
+### 6.3 List Joined Rooms
 - **Method / Path**: `GET /api/rooms?cursor=...&limit=...&type=...&isArchived=...`
 - **Auth**: Required
 - **Query Parameters** (`ListRoomsQueryDto`):
@@ -262,29 +262,29 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 }
 ```
 
-### 5.4 Get Room Details
+### 6.4 Get Room Details
 - **Method / Path**: `GET /api/rooms/:roomId`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
 - **Response**: `200 OK` (`RoomDetailResponse`, includes `members` list)
 
-### 5.5 Update Group Room
+### 6.5 Update Group Room
 - **Method / Path**: `PATCH /api/rooms/:roomId`
 - **Auth**: Required (Owner or Admin)
 - **Path Parameters**: `roomId` (UUIDv7)
 - **Request Body** (`UpdateRoomDto` - at least one field required):
-  - `name`: `string` (optional, 1-100 chars)
+  - `name`: `string` (optional, 1-80 chars)
   - `description`: `string` (optional, max 500 chars)
   - `image`: `string` (optional, HTTPS URL, max 2048 chars)
 - **Response**: `200 OK` (`RoomDetailResponse`)
 
-### 5.6 Delete Group Room
+### 6.6 Delete Group Room
 - **Method / Path**: `DELETE /api/rooms/:roomId`
 - **Auth**: Required (Owner only)
 - **Path Parameters**: `roomId` (UUIDv7)
 - **Response**: `204 No Content`
 
-### 5.7 List Room Members
+### 6.7 List Room Members
 - **Method / Path**: `GET /api/rooms/:roomId/members`
 - **Auth**: Required (Must be a member)
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -305,7 +305,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 ]
 ```
 
-### 5.8 Add Members to Room
+### 6.8 Add Members to Room
 - **Method / Path**: `POST /api/rooms/:roomId/members`
 - **Auth**: Required (Owner or Admin)
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -313,7 +313,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
   - `userIds`: `string[]` (required, array of 1-100 unique user IDs)
 - **Response**: `200 OK` -> array of `RoomMemberResponse`
 
-### 5.9 Remove Member from Room
+### 6.9 Remove Member from Room
 - **Method / Path**: `DELETE /api/rooms/:roomId/members/:userId`
 - **Auth**: Required (Owner or Admin removing member)
 - **Path Parameters**:
@@ -321,7 +321,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
   - `userId` (string, 1-64 chars)
 - **Response**: `204 No Content`
 
-### 5.10 Update Member Role
+### 6.10 Update Member Role
 - **Method / Path**: `PATCH /api/rooms/:roomId/members/:userId`
 - **Auth**: Required (Owner only)
 - **Path Parameters**: `roomId` (UUIDv7), `userId` (string)
@@ -329,13 +329,13 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
   - `role`: `string` (required, enum: `'ADMIN' | 'MEMBER'`)
 - **Response**: `200 OK` (`RoomMemberResponse`)
 
-### 5.11 Leave Room
+### 6.11 Leave Room
 - **Method / Path**: `POST /api/rooms/:roomId/leave`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
 - **Response**: `204 No Content`
 
-### 5.12 Update Room Preferences
+### 6.12 Update Room Preferences
 - **Method / Path**: `PATCH /api/rooms/:roomId/preferences`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -376,7 +376,7 @@ Health checks are public endpoints used by Docker, load balancers, and orchestra
 
 Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages`) or directly by message ID (`/api/messages/:messageId`).
 
-### 6.1 Resync Messages After Disconnect
+### 7.1 Resync Messages After Disconnect
 - **Method / Path**: `GET /api/rooms/:roomId/messages/sync?afterId=...&limit=...`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -385,7 +385,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
   - `limit`: `number` (optional, integer 1-100, default `50`)
 - **Response**: `200 OK` (`MessagePageResponse`)
 
-### 6.2 Paginate Messages in Room
+### 7.2 Paginate Messages in Room
 - **Method / Path**: `GET /api/rooms/:roomId/messages?cursor=...&limit=...&direction=...`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -422,7 +422,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
 }
 ```
 
-### 6.3 Send Message (HTTP REST)
+### 7.3 Send Message (HTTP REST)
 - **Method / Path**: `POST /api/rooms/:roomId/messages`
 - **Auth**: Required
 - **Path Parameters**: `roomId` (UUIDv7)
@@ -433,7 +433,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
   - `mediaIds`: `string[]` (optional, array of 1-10 UUIDv7s)
 - **Response**: `201 Created` (`MessageResponse`)
 
-### 6.4 Edit Message
+### 7.4 Edit Message
 - **Method / Path**: `PATCH /api/messages/:messageId`
 - **Auth**: Required (Author only)
 - **Path Parameters**: `messageId` (UUIDv7)
@@ -441,13 +441,13 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
   - `body`: `string` (required, 1-4000 chars)
 - **Response**: `200 OK` (`MessageResponse`)
 
-### 6.5 Delete Message (Soft Delete)
+### 7.5 Delete Message (Soft Delete)
 - **Method / Path**: `DELETE /api/messages/:messageId`
 - **Auth**: Required (Author or Room Admin/Owner)
 - **Path Parameters**: `messageId` (UUIDv7)
 - **Response**: `204 No Content`
 
-### 6.6 Add Reaction
+### 7.6 Add Reaction
 - **Method / Path**: `POST /api/messages/:messageId/reactions`
 - **Auth**: Required
 - **Path Parameters**: `messageId` (UUIDv7)
@@ -465,7 +465,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
 ]
 ```
 
-### 6.7 Remove Reaction
+### 7.7 Remove Reaction
 - **Method / Path**: `DELETE /api/messages/:messageId/reactions?emoji=...`
 - **Auth**: Required
 - **Path Parameters**: `messageId` (UUIDv7)
@@ -473,7 +473,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
   - `emoji`: `string` (required, 1-16 chars)
 - **Response**: `200 OK` -> array of `ReactionSummaryResponse`
 
-### 6.8 Get Message Delivery Receipts
+### 7.8 Get Message Delivery Receipts
 - **Method / Path**: `GET /api/messages/:messageId/receipts`
 - **Auth**: Required
 - **Path Parameters**: `messageId` (UUIDv7)
@@ -495,7 +495,7 @@ Messages are accessible either scoped under a room (`/api/rooms/:roomId/messages
 
 Direct uploads bypass backend file streams by generating a presigned Cloudinary upload signature.
 
-### 7.1 Request Direct Upload Signature
+### 8.1 Request Direct Upload Signature
 - **Method / Path**: `POST /api/media/signature`
 - **Auth**: Required
 - **Request Body** (`RequestUploadSignatureDto`):
@@ -519,7 +519,7 @@ Direct uploads bypass backend file streams by generating a presigned Cloudinary 
 }
 ```
 
-### 7.2 Confirm Upload Success
+### 8.2 Confirm Upload Success
 - **Method / Path**: `POST /api/media/confirm`
 - **Auth**: Required
 - **Request Body** (`ConfirmUploadDto`):
@@ -545,13 +545,13 @@ Direct uploads bypass backend file streams by generating a presigned Cloudinary 
 }
 ```
 
-### 7.3 Get Media Metadata
+### 8.3 Get Media Metadata
 - **Method / Path**: `GET /api/media/:mediaId`
 - **Auth**: Required
 - **Path Parameters**: `mediaId` (UUIDv7)
 - **Response**: `200 OK` (`MediaResponse`)
 
-### 7.4 Delete Media
+### 8.4 Delete Media
 - **Method / Path**: `DELETE /api/media/:mediaId`
 - **Auth**: Required (Owner only)
 - **Path Parameters**: `mediaId` (UUIDv7)
