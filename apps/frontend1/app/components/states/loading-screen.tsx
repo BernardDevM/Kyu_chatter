@@ -1,9 +1,13 @@
-import { Loader2 } from "lucide-react";
+import { KyuMark } from "@/components/brand/kyu-mark";
 
 export function LoadingScreen() {
   return (
-    <div className="bg-background flex h-dvh w-full items-center justify-center">
-      <Loader2 className="text-primary size-8 animate-spin" />
+    <div
+      role="status"
+      aria-label="Loading"
+      className="bg-background flex h-dvh w-full items-center justify-center"
+    >
+      <KyuMark className="text-primary size-10 animate-pulse" />
     </div>
   );
 }

@@ -109,10 +109,10 @@ export function MessageComposer({ roomId }: { roomId: string }) {
   };
 
   return (
-    <div {...getRootProps()} className="shrink-0 px-4 pb-4">
+    <div {...getRootProps()} className="shrink-0 px-4 pb-4 md:px-6 md:pb-5">
       <input {...getInputProps()} />
       <div
-        className={`bg-card rounded-xl border transition-colors ${isDragActive ? "border-primary ring-primary/30 ring-2" : ""}`}
+        className={`bg-card focus-within:border-ring focus-within:ring-ring/20 rounded-xl border shadow-sm transition-[border-color,box-shadow] focus-within:ring-4 ${isDragActive ? "border-primary ring-primary/30 ring-2" : ""}`}
       >
         {(replyTo || editing) && (
           <div className="text-muted-foreground flex items-center gap-2 border-b px-3 py-1.5 text-xs">

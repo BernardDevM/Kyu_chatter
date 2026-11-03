@@ -38,7 +38,7 @@ export function MessageItem({
   return (
     <div
       className={cn(
-        "group hover:bg-accent/30 relative flex gap-3 px-4 py-0.5",
+        "group hover:bg-muted/60 relative flex gap-3 px-4 py-0.5 md:px-6",
         startsGroup && "mt-3",
         m.pending && "opacity-60",
       )}
@@ -47,7 +47,7 @@ export function MessageItem({
         {startsGroup ? (
           <UserAvatar name={m.sender.name} image={m.sender.image} userId={m.senderId} />
         ) : (
-          <span className="text-muted-foreground hidden text-[10px] group-hover:block">
+          <span className="text-muted-foreground hidden font-mono text-[10px] group-hover:block">
             {time}
           </span>
         )}
@@ -56,8 +56,10 @@ export function MessageItem({
       <div className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold">{m.sender.name}</span>
-            <span className="text-muted-foreground text-xs">{time}</span>
+            <span className={cn("font-display text-sm font-bold", isMine && "text-primary")}>
+              {m.sender.name}
+            </span>
+            <span className="text-muted-foreground font-mono text-[10px]">{time}</span>
           </div>
         )}
 
@@ -102,7 +104,7 @@ export function MessageItem({
       </div>
 
       {!deleted && !m.pending && !m.failed && (
-        <div className="bg-popover absolute -top-3 right-4 hidden items-center rounded-md border shadow-sm group-hover:flex">
+        <div className="bg-popover absolute -top-3 right-4 hidden md:right-6 items-center rounded-md border shadow-sm group-hover:flex">
           <ReactionPicker onPick={(e) => onReact(e, false)} />
           <Button
             variant="ghost"

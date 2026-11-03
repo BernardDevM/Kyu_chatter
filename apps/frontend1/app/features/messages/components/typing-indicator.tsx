@@ -27,7 +27,7 @@ export function TypingIndicator({
         {[0, 150, 300].map((d) => (
           <span
             key={d}
-            className="bg-muted-foreground size-1.5 animate-bounce rounded-full"
+            className="bg-primary size-1.5 animate-bounce rounded-full"
             style={{ animationDelay: `${d}ms` }}
           />
         ))}

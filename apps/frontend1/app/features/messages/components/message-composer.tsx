@@ -177,7 +177,7 @@ export function MessageComposer({ roomId }: { roomId: string }) {
             onKeyDown={onKeyDown}
             className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-2 shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
-          <Button size="icon" className="rounded-full" aria-label="Send" disabled={!canSend} onClick={submit}>
+          <Button size="icon" className="bg-signal text-signal-foreground hover:bg-signal/90 rounded-full" aria-label="Send" disabled={!canSend} onClick={submit}>
             <Send />
           </Button>
         </div>

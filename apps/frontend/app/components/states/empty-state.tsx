@@ -14,10 +14,10 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-      <div className="bg-primary/10 text-primary flex size-14 items-center justify-center rounded-2xl">
-        <Icon className="size-7" />
+      <div className="bg-accent text-primary flex size-12 items-center justify-center rounded-lg">
+        <Icon className="size-6" />
       </div>
-      <h3 className="text-base font-semibold">{title}</h3>
+      <h3 className="text-lg font-bold">{title}</h3>
       {description && (
         <p className="text-muted-foreground max-w-xs text-sm">{description}</p>
       )}

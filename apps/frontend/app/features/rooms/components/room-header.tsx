@@ -35,7 +35,7 @@ export function RoomHeader({
           : "Offline";
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b px-3 md:px-4">
+    <header className="bg-card/80 flex h-16 shrink-0 items-center gap-3 border-b px-3 backdrop-blur md:px-5">
       <Button variant="ghost" size="icon" className="md:hidden" asChild>
         <Link to="/chat" aria-label="Back to chats">
           <ArrowLeft />
@@ -47,8 +47,8 @@ export function RoomHeader({
         userId={peerId}
       />
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-sm font-semibold">{title}</h1>
-        <p className="text-muted-foreground truncate text-xs">{subtitle}</p>
+        <h1 className="truncate text-base leading-tight font-bold">{title}</h1>
+        <p className="text-muted-foreground truncate font-mono text-[11px]">{subtitle}</p>
       </div>
       <Button
         variant="ghost"

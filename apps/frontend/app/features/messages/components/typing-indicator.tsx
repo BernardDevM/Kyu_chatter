@@ -22,12 +22,12 @@ export function TypingIndicator({
         : "Several people are typing";
 
   return (
-    <div className="text-muted-foreground flex h-5 items-center gap-1.5 px-4 text-xs">
+    <div className="text-muted-foreground flex h-5 items-center gap-1.5 px-4 font-mono text-[11px] md:px-6">
       <span className="flex gap-0.5">
         {[0, 150, 300].map((d) => (
           <span
             key={d}
-            className="bg-muted-foreground size-1 animate-bounce rounded-full"
+            className="bg-signal size-1 animate-bounce rounded-full"
             style={{ animationDelay: `${d}ms` }}
           />
         ))}
