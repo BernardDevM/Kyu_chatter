@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getAllowedOrigins,
   isOriginAllowed,
@@ -10,10 +10,12 @@ describe('cors.util', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    delete process.env.CORS_ALLOW_LOCALHOST;
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
   describe('getAllowedOrigins', () => {
@@ -45,6 +47,35 @@ describe('cors.util', () => {
       expect(origins).toEqual(['https://chat.example.com']);
       expect(origins).not.toContain('http://localhost:5173');
     });
+
+    it('falls back to the default production origin instead of throwing when unset', () => {
+      delete process.env.FRONTEND_URLS;
+      delete process.env.FRONTEND_URL;
+      process.env.NODE_ENV = 'production';
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      expect(getAllowedOrigins()).toEqual(['https://kyu-chatter-2.vercel.app']);
+    });
+
+    it('strips trailing slashes and whitespace from configured origins', () => {
+      process.env.FRONTEND_URLS = ' https://chat.example.com/ , https://b.example.com// ';
+      process.env.NODE_ENV = 'production';
+
+      expect(getAllowedOrigins()).toEqual([
+        'https://chat.example.com',
+        'https://b.example.com',
+      ]);
+    });
+
+    it('adds localhost origins in production only when CORS_ALLOW_LOCALHOST=true', () => {
+      process.env.FRONTEND_URLS = 'https://chat.example.com';
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ALLOW_LOCALHOST = 'true';
+
+      const origins = getAllowedOrigins();
+      expect(origins).toContain('https://chat.example.com');
+      expect(origins).toContain('http://localhost:5173');
+    });
   });
 
   describe('isOriginAllowed', () => {
@@ -65,6 +96,27 @@ describe('cors.util', () => {
       process.env.FRONTEND_URLS = 'https://app.kyu.com';
       expect(isOriginAllowed('https://evil-site.com')).toBe(false);
     });
+
+    it('rejects localhost in production by default', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.FRONTEND_URLS = 'https://app.kyu.com';
+      expect(isOriginAllowed('http://localhost:5173')).toBe(false);
+      expect(isOriginAllowed('http://localhost:4321')).toBe(false);
+    });
+
+    it('allows any localhost port in production when CORS_ALLOW_LOCALHOST=true', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.FRONTEND_URLS = 'https://app.kyu.com';
+      process.env.CORS_ALLOW_LOCALHOST = 'true';
+      expect(isOriginAllowed('http://localhost:5173')).toBe(true);
+      expect(isOriginAllowed('http://localhost:4321')).toBe(true);
+    });
+
+    it('matches an allowed origin sent with a trailing slash', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.FRONTEND_URLS = 'https://app.kyu.com';
+      expect(isOriginAllowed('https://app.kyu.com/')).toBe(true);
+    });
   });
 
   describe('corsOriginCallback', () => {
@@ -82,11 +134,11 @@ describe('cors.util', () => {
       expect(allowResult).toBe(true);
     });
 
-    it('calls callback with Error for forbidden origins in production', () => {
+    it('calls callback with null, false (no Error / no 500) for forbidden origins in production', () => {
       process.env.NODE_ENV = 'production';
       process.env.FRONTEND_URLS = 'https://app.kyu.com';
 
-      let errResult: Error | null = null;
+      let errResult: Error | null = new Error('not called');
       let allowResult: boolean | undefined = true;
 
       corsOriginCallback('https://malicious.com', (err, allow) => {
@@ -94,8 +146,8 @@ describe('cors.util', () => {
         allowResult = allow;
       });
 
-      expect(errResult).toBeInstanceOf(Error);
-      expect(allowResult).toBeUndefined();
+      expect(errResult).toBeNull();
+      expect(allowResult).toBe(false);
     });
   });
 });
