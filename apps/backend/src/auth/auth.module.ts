@@ -30,6 +30,9 @@ import { AuthService } from './auth.service.js';
 
   providers: [AuthService],
 
-  exports: [AuthService],
+exports: [
+  AuthService,
+  BetterAuthNestModule,
+],
 })
 export class AuthModule {}
