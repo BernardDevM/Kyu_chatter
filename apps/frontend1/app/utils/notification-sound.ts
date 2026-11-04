@@ -25,6 +25,7 @@ export function enableTypingNotificationSound() {
 export async function playNotificationSound() {
   if (!notificationAudio) {
     enableNotificationSound();
+    enableNotificationSound()
   }
 
   if (!notificationAudio) return;
