@@ -5,7 +5,10 @@ import { toast } from "sonner";
 
 import { useCurrentUser } from "@/features/auth/hooks/use-current-user";
 import { messagesApi } from "@/features/messages/api/messages-api";
-import type { Message, ReactionSummary } from "@/features/messages/types/message";
+import type {
+  Message,
+  ReactionSummary,
+} from "@/features/messages/types/message";
 import {
   lastConfirmedId,
   type MessagesData,
@@ -15,7 +18,10 @@ import {
 } from "@/features/messages/utils/messages-cache";
 import { usePresenceStore } from "@/features/presence/stores/presence-store";
 import type { Room, RoomDetail } from "@/features/rooms/types/room";
-import { applyNewMessage, upsertRoom } from "@/features/rooms/utils/rooms-cache";
+import {
+  applyNewMessage,
+  upsertRoom,
+} from "@/features/rooms/utils/rooms-cache";
 import { queryKeys } from "@/lib/query-keys";
 
 import {
@@ -27,7 +33,7 @@ import {
 } from "../lib/socket";
 import { useConnectionStore } from "../stores/connection-store";
 import { useTypingStore } from "../stores/typing-store";
-import { playNotificationSound } from "@/utils/notification-sound";
+import { playNotificationSound, playTyping } from "@/utils/notification-sound";
 
 const HEARTBEAT_MS = 30_000;
 
@@ -90,43 +96,48 @@ export function useRealtimeEvents() {
     const onDisconnect = () => setStatus("disconnected");
 
     const onNew = (msg: Message) => {
-  const mine = msg.senderId === meId;
-  const active = activeRoomRef.current === msg.roomId;
+      const mine = msg.senderId === meId;
+      const active = activeRoomRef.current === msg.roomId;
 
-  // Play notification sound for incoming messages
-  if (!mine && !active) {
-    void playNotificationSound();
-  }
+      // Play notification sound for incoming messages
+      if (!mine && !active) {
+        void playNotificationSound();
+      }
 
-  queryClient.setQueryData<MessagesData>(
-    queryKeys.messages(msg.roomId),
-    (d) => upsertMessage(d, msg),
-  );
+      queryClient.setQueryData<MessagesData>(
+        queryKeys.messages(msg.roomId),
+        (d) => upsertMessage(d, msg),
+      );
 
-  queryClient.setQueryData<Room[]>(
-    queryKeys.rooms,
-    (rooms) => applyNewMessage(rooms, msg, !mine && !active),
-  );
+      queryClient.setQueryData<Room[]>(queryKeys.rooms, (rooms) =>
+        applyNewMessage(rooms, msg, !mine && !active),
+      );
 
-  if (!mine) {
-    useTypingStore.getState().setTyping(msg.roomId, msg.senderId, false);
-  }
-};
+      if (!mine) {
+        useTypingStore.getState().setTyping(msg.roomId, msg.senderId, false);
+      }
+    };
 
     const onUpdated = (msg: Message) =>
-      queryClient.setQueryData<MessagesData>(queryKeys.messages(msg.roomId), (d) =>
-        upsertMessage(d, msg),
+      queryClient.setQueryData<MessagesData>(
+        queryKeys.messages(msg.roomId),
+        (d) => upsertMessage(d, msg),
       );
 
     const onDeleted = (p: { messageId: string; roomId: string }) =>
-      queryClient.setQueryData<MessagesData>(queryKeys.messages(p.roomId), (d) =>
-        patchMessage(d, p.messageId, {
-          deletedAt: new Date().toISOString(),
-          body: null,
-        }),
+      queryClient.setQueryData<MessagesData>(
+        queryKeys.messages(p.roomId),
+        (d) =>
+          patchMessage(d, p.messageId, {
+            deletedAt: new Date().toISOString(),
+            body: null,
+          }),
       );
 
-    const onReaction = (p: { messageId: string; reactions: ReactionSummary[] }) => {
+    const onReaction = (p: {
+      messageId: string;
+      reactions: ReactionSummary[];
+    }) => {
       // `hasReacted` is per viewer; recompute it from the id list.
       const reactions = p.reactions.map((r) => ({
         ...r,
@@ -140,9 +151,15 @@ export function useRealtimeEvents() {
         );
     };
 
-    const onTyping = (p: { roomId: string; userId: string; isTyping: boolean }) => {
+    const onTyping = (p: {
+      roomId: string;
+      userId: string;
+      isTyping: boolean;
+    }) => {
       if (p.userId !== meId)
         useTypingStore.getState().setTyping(p.roomId, p.userId, p.isTyping);
+
+      void playTyping();
     };
 
     const onPresence = (p: {
