@@ -27,6 +27,7 @@ import {
 } from "../lib/socket";
 import { useConnectionStore } from "../stores/connection-store";
 import { useTypingStore } from "../stores/typing-store";
+import { playNotificationSound } from "@/utils/notification-sound";
 
 const HEARTBEAT_MS = 30_000;
 
@@ -89,16 +90,28 @@ export function useRealtimeEvents() {
     const onDisconnect = () => setStatus("disconnected");
 
     const onNew = (msg: Message) => {
-      const mine = msg.senderId === meId;
-      const active = activeRoomRef.current === msg.roomId;
-      queryClient.setQueryData<MessagesData>(queryKeys.messages(msg.roomId), (d) =>
-        upsertMessage(d, msg),
-      );
-      queryClient.setQueryData<Room[]>(queryKeys.rooms, (rooms) =>
-        applyNewMessage(rooms, msg, !mine && !active),
-      );
-      if (!mine) useTypingStore.getState().setTyping(msg.roomId, msg.senderId, false);
-    };
+  const mine = msg.senderId === meId;
+  const active = activeRoomRef.current === msg.roomId;
+
+  // Play notification sound for incoming messages
+  if (!mine && !active) {
+    void playNotificationSound();
+  }
+
+  queryClient.setQueryData<MessagesData>(
+    queryKeys.messages(msg.roomId),
+    (d) => upsertMessage(d, msg),
+  );
+
+  queryClient.setQueryData<Room[]>(
+    queryKeys.rooms,
+    (rooms) => applyNewMessage(rooms, msg, !mine && !active),
+  );
+
+  if (!mine) {
+    useTypingStore.getState().setTyping(msg.roomId, msg.senderId, false);
+  }
+};
 
     const onUpdated = (msg: Message) =>
       queryClient.setQueryData<MessagesData>(queryKeys.messages(msg.roomId), (d) =>
